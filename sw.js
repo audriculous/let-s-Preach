@@ -1,5 +1,5 @@
 // Offline support: cache the app shell. Bump VERSION when files change.
-const VERSION = 'lp-v2';
+const VERSION = 'lp-v3';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'css/fonts.css', 'js/app.js', 'js/ink.js', 'js/bible.js', 'js/db.js', 'js/pdf.js',
   'fonts/Barlow-400.woff2', 'fonts/Barlow-400i.woff2', 'fonts/Barlow-500.woff2', 'fonts/Barlow-600.woff2',

@@ -39,6 +39,7 @@ async function fetchWithTimeout(url) {
 export async function fetchPassage(search, version, workerUrl, onProgress) {
   const urls = relays(search, version, workerUrl);
   let lastErr = null;
+  let workerErr = null;
   for (let i = 0; i < urls.length; i++) {
     onProgress && onProgress(i, urls.length);
     try {
@@ -47,15 +48,20 @@ export async function fetchPassage(search, version, workerUrl, onProgress) {
       if (parsed) return parsed;
       lastErr = new Error('not-found');
       // A relay returned a real Bible Gateway page with no passage: the reference is wrong.
-      if (/biblegateway/i.test(html) && html.length > 5000) break;
+      if (/class="search-/.test(html) && /biblegateway/i.test(html)) break;
+      if (workerUrl && i === 0) workerErr = 'it answered, but not with a passage page';
     } catch (e) {
       lastErr = e;
+      if (workerUrl && i === 0) workerErr = e.name === 'AbortError' ? 'it timed out' : e.message;
     }
   }
-  if (lastErr && lastErr.message === 'not-found') {
+  if (lastErr && lastErr.message === 'not-found' && !workerErr) {
     throw new Error('Bible Gateway could not find "' + search + '". Check the reference and try again.');
   }
-  throw new Error('Could not reach Bible Gateway. Check your connection, or set up your own fetcher in Settings. You can also paste the text instead.');
+  if (workerErr) {
+    throw new Error('Your fetcher in Settings did not work (' + workerErr + '). Check the URL, or paste the text instead.');
+  }
+  throw new Error('Could not reach Bible Gateway through the free relays. Set up your own fetcher in Settings (see the README), or paste the text instead.');
 }
 
 // ---------- Parsing ----------
