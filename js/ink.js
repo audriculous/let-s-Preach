@@ -31,6 +31,7 @@ export class Ink {
     this.size = 3;
     this.fingerDraw = false;
     this.smoothing = 2;     // 0 off, 1 low, 2 medium, 3 high
+    this.snapShapes = true; // hold the Pencil still to turn a stroke into a line or oval
 
     this.tiles = new Map(); // index -> { hl, ink }
     this.pool = [];
@@ -274,6 +275,12 @@ export class Ink {
     for (const ev of (evs.length ? evs : [e])) {
       let [x, y, p] = this._point(ev);
       a.raw = [x, y, p];
+      if (a.snapped) {
+        // After a line snaps, keep holding and drag to move its far end.
+        if (a.snapped.type === 'line') this._dragLineEnd(x, y);
+        continue;
+      }
+      this._armHold(x, y);
       // Stabiliser: the line trails the Pencil slightly, which irons out hand wobble.
       a.sx += (x - a.sx) * follow;
       a.sy += (y - a.sy) * follow;
@@ -315,9 +322,10 @@ export class Ink {
     const a = this.active;
     if (!a || e.pointerId !== a.pointerId) return;
     this.active = null;
+    clearTimeout(a.holdTimer);
     let pts = a.pts;
-    const liveBox = bboxOf({ pts, size: a.size }); // where the live preview was painted
-    if (this.smoothing) {
+    const liveBox = union(bboxOf({ pts, size: a.size }), a.paintedBox || bboxOf({ pts, size: a.size })); // where the live preview was painted
+    if (this.smoothing && !a.snapped) {
       const n = pts.length;
       const [rx, ry, rp] = a.raw;
       if ((rx - pts[n - 3]) ** 2 + (ry - pts[n - 2]) ** 2 > 0.6) pts.push(r1(rx), r1(ry), r2(rp));
@@ -335,6 +343,51 @@ export class Ink {
     });
     this.onChange();
     if (stroke.bbox[3] > this.pageH - 350) this.onNearBottom();
+  }
+
+  // ---------- hold to snap ----------
+
+  // Restart the hold timer whenever the Pencil moves more than a few px.
+  _armHold(x, y) {
+    const a = this.active;
+    if (!this.snapShapes) return;
+    if (a.hold && Math.hypot(x - a.hold.x, y - a.hold.y) < HOLD_SLOP) return;
+    a.hold = { x, y };
+    clearTimeout(a.holdTimer);
+    a.holdTimer = setTimeout(() => this._snap(), HOLD_MS);
+  }
+
+  _snap() {
+    const a = this.active;
+    if (!a || a.snapped) return;
+    const shape = recognise(a.pts, a.raw);
+    if (!shape) return;
+    const before = bboxOf({ pts: a.pts, size: a.size });
+    a.snapped = shape;
+    a.pts = shapePoints(shape, avgPressure(a.pts));
+    this._repaintActive(before);
+  }
+
+  _dragLineEnd(x, y) {
+    const a = this.active, L = a.snapped;
+    const before = bboxOf({ pts: a.pts, size: a.size });
+    [L.x1, L.y1] = straighten(L.x0, L.y0, x, y);
+    a.pts = shapePoints(L, a.pts[2]);
+    this._repaintActive(before);
+  }
+
+  // Wipe the old preview and paint the active stroke whole.
+  _repaintActive(prevBox) {
+    const a = this.active;
+    const nb = bboxOf({ pts: a.pts, size: a.size });
+    a.paintedBox = union(a.paintedBox || prevBox, union(prevBox, nb));
+    this.redrawRegion(union(prevBox, nb));
+    const layer = a.tool === 'highlighter' ? 'hl' : 'ink';
+    for (const [i, t] of this.tiles) {
+      const y0 = i * TILE_H;
+      if (nb[3] < y0 || nb[1] > y0 + TILE_H) continue;
+      drawStroke(this._ctx(t[layer], i), a);
+    }
   }
 
   // Draw only the newest segment of the live stroke on the tiles it touches.
@@ -393,6 +446,94 @@ const r2 = v => Math.round(v * 100) / 100;
 // tidy-up passes run when the Pencil lifts. Index 0 is off.
 const FOLLOW = [1, 0.6, 0.42, 0.28];
 const PASSES = [0, 1, 2, 4];
+
+// Hold to snap: how long the Pencil must rest, and how far it may drift (logical px).
+const HOLD_MS = 550;
+const HOLD_SLOP = 4;
+const AXIS_SNAP_DEG = 5;
+
+const union = (a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])];
+
+function avgPressure(P) {
+  let t = 0;
+  for (let i = 2; i < P.length; i += 3) t += P[i];
+  return r2(t / (P.length / 3));
+}
+
+// Lines close to level or upright become exactly level or upright.
+function straighten(x0, y0, x1, y1) {
+  const deg = Math.abs(Math.atan2(y1 - y0, x1 - x0) * 180 / Math.PI);
+  if (deg < AXIS_SNAP_DEG || deg > 180 - AXIS_SNAP_DEG) return [x1, y0];
+  if (Math.abs(deg - 90) < AXIS_SNAP_DEG) return [x0, y1];
+  return [x1, y1];
+}
+
+// Decide whether a held stroke is a line, an oval, or neither (left as handwriting).
+function recognise(P, raw) {
+  const n = P.length / 3;
+  if (n < 4) return null;
+  let len = 0, minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = P[i * 3], y = P[i * 3 + 1];
+    if (i) len += Math.hypot(x - P[(i - 1) * 3], y - P[(i - 1) * 3 + 1]);
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  }
+  if (len < 24) return null;
+  const x0 = P[0], y0 = P[1], [ex, ey] = raw;
+  const gap = Math.hypot(ex - x0, ey - y0);
+
+  if (gap / len > 0.85) {
+    const [x1, y1] = straighten(x0, y0, ex, ey);
+    return { type: 'line', x0, y0, x1, y1 };
+  }
+
+  const w = maxX - minX, h = maxY - minY, big = Math.max(w, h);
+  if (big < 20 || gap > 0.35 * big || len < 1.1 * (w + h) || len > 3.2 * (w + h)) return null;
+
+  // Fit a (possibly tilted) oval through the points' spread.
+  let mx = 0, my = 0;
+  for (let i = 0; i < n; i++) { mx += P[i * 3]; my += P[i * 3 + 1]; }
+  mx /= n; my /= n;
+  let sxx = 0, syy = 0, sxy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = P[i * 3] - mx, dy = P[i * 3 + 1] - my;
+    sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+  }
+  let ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  if (Math.abs(ang) < 6 * Math.PI / 180) ang = 0; // nearly level ovals sit level
+  const c = Math.cos(ang), s = Math.sin(ang);
+  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const dx = P[i * 3] - mx, dy = P[i * 3 + 1] - my;
+    const u = dx * c + dy * s, v = -dx * s + dy * c;
+    u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v);
+  }
+  const rx = (u1 - u0) / 2, ry = (v1 - v0) / 2;
+  if (rx < 6 || ry < 6) return null;
+  const cu = (u0 + u1) / 2, cv = (v0 + v1) / 2;
+  const cx = mx + cu * c - cv * s, cy = my + cu * s + cv * c;
+
+  // Only snap if the stroke really was roughly oval.
+  let err = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = P[i * 3] - cx, dy = P[i * 3 + 1] - cy;
+    const u = dx * c + dy * s, v = -dx * s + dy * c;
+    err += Math.abs(Math.hypot(u / rx, v / ry) - 1);
+  }
+  if (err / n > 0.22) return null;
+  return { type: 'oval', cx, cy, rx, ry, ang };
+}
+
+function shapePoints(sh, p) {
+  if (sh.type === 'line') return [r1(sh.x0), r1(sh.y0), p, r1(sh.x1), r1(sh.y1), p];
+  const out = [], c = Math.cos(sh.ang), s = Math.sin(sh.ang), N = 72;
+  for (let i = 0; i <= N; i++) {
+    const t = (i / N) * Math.PI * 2;
+    const u = Math.cos(t) * sh.rx, v = Math.sin(t) * sh.ry;
+    out.push(r1(sh.cx + u * c - v * s), r1(sh.cy + u * s + v * c), p);
+  }
+  return out;
+}
 
 // Tidy a finished stroke: each pass nudges every point toward the average of its
 // neighbours (1-2-1 weights). Endpoints stay put, and sharp corners such as the

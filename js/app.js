@@ -26,7 +26,7 @@ const MARGINS = {
 
 const loadJSON = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return { ...d }; } };
 const prefs = loadJSON('letspreach.prefs', {
-  tool: 'pen', zoom: 1, fingerDraw: false, smoothing: 2,
+  tool: 'pen', zoom: 1, fingerDraw: false, smoothing: 2, snapShapes: true,
   color: { pen: PALETTES.pen[0], highlighter: PALETTES.highlighter[0], text: PALETTES.text[1] },
   size: { pen: 1, highlighter: 1, text: 1 },
 });
@@ -517,6 +517,7 @@ $('menuClose').addEventListener('click', () => { $('menuPanel').hidden = true; }
 function syncPanel() {
   const L = study.layout;
   $('fingerDraw').checked = prefs.fingerDraw;
+  $('snapShapes').checked = prefs.snapShapes;
   document.querySelectorAll('#smoothSeg button').forEach(b => b.classList.toggle('active', +b.dataset.smooth === prefs.smoothing));
   $('optVerses').checked = L.verses;
   $('optHeadings').checked = L.headings;
@@ -573,6 +574,11 @@ document.querySelectorAll('[data-smooth]').forEach(b => b.addEventListener('clic
   syncPanel();
 }));
 ink.smoothing = prefs.smoothing;
+ink.snapShapes = prefs.snapShapes;
+$('snapShapes').addEventListener('change', e => {
+  prefs.snapShapes = ink.snapShapes = e.target.checked;
+  savePrefs();
+});
 
 function applyFingerDraw() {
   ink.fingerDraw = prefs.fingerDraw;
