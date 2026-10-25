@@ -30,6 +30,7 @@ export class Ink {
     this.color = '#1f1d1a';
     this.size = 3;
     this.fingerDraw = false;
+    this.smoothing = 2;     // 0 off, 1 low, 2 medium, 3 high
 
     this.tiles = new Map(); // index -> { hl, ink }
     this.pool = [];
@@ -253,6 +254,8 @@ export class Ink {
       pressure: e.pointerType === 'pen' && !isHl,
       pts: [r1(x), r1(y), r2(p)],
       lastP: p,
+      sx: x, sy: y,           // stabilised pen position
+      raw: [x, y, p],         // last unsmoothed sample, so the stroke ends where the Pencil lifted
     };
     this._drawLive(true);
   }
@@ -267,8 +270,14 @@ export class Ink {
     if (!a || e.pointerId !== a.pointerId) return;
     e.preventDefault();
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    const follow = FOLLOW[this.smoothing] ?? 1;
     for (const ev of (evs.length ? evs : [e])) {
       let [x, y, p] = this._point(ev);
+      a.raw = [x, y, p];
+      // Stabiliser: the line trails the Pencil slightly, which irons out hand wobble.
+      a.sx += (x - a.sx) * follow;
+      a.sy += (y - a.sy) * follow;
+      x = a.sx; y = a.sy;
       const n = a.pts.length;
       const dx = x - a.pts[n - 3], dy = y - a.pts[n - 2];
       if (dx * dx + dy * dy < 0.6) continue; // skip jitter
@@ -306,10 +315,20 @@ export class Ink {
     const a = this.active;
     if (!a || e.pointerId !== a.pointerId) return;
     this.active = null;
-    const stroke = { id: a.id, tool: a.tool, color: a.color, size: a.size, pressure: a.pressure, pts: a.pts };
+    let pts = a.pts;
+    const liveBox = bboxOf({ pts, size: a.size }); // where the live preview was painted
+    if (this.smoothing) {
+      const n = pts.length;
+      const [rx, ry, rp] = a.raw;
+      if ((rx - pts[n - 3]) ** 2 + (ry - pts[n - 2]) ** 2 > 0.6) pts.push(r1(rx), r1(ry), r2(rp));
+      pts = smoothPoints(pts, PASSES[this.smoothing]);
+    }
+    const stroke = { id: a.id, tool: a.tool, color: a.color, size: a.size, pressure: a.pressure, pts };
     stroke.bbox = bboxOf(stroke);
     this.strokes.push(stroke);
-    this.redrawRegion(stroke.bbox); // replaces the live preview with the clean render
+    const b = stroke.bbox;
+    // Replace the live preview with the clean (smoothed) render.
+    this.redrawRegion([Math.min(b[0], liveBox[0]), Math.min(b[1], liveBox[1]), Math.max(b[2], liveBox[2]), Math.max(b[3], liveBox[3])]);
     this.onAction({
       undo: () => this.removeStrokes([stroke], false),
       redo: () => this.addStroke(stroke, false),
@@ -369,6 +388,31 @@ function makeCanvas(cls) {
 
 const r1 = v => Math.round(v * 10) / 10;
 const r2 = v => Math.round(v * 100) / 100;
+
+// Smoothing levels: how closely the live line follows the Pencil, and how many
+// tidy-up passes run when the Pencil lifts. Index 0 is off.
+const FOLLOW = [1, 0.6, 0.42, 0.28];
+const PASSES = [0, 1, 2, 4];
+
+// Tidy a finished stroke: each pass nudges every point toward the average of its
+// neighbours (1-2-1 weights). Endpoints stay put, and sharp corners such as the
+// tops of letters are softened only a little, so handwriting keeps its shape.
+function smoothPoints(P, passes) {
+  const n = P.length / 3;
+  if (n < 4 || !passes) return P;
+  let a = P.slice();
+  for (let k = 0; k < passes; k++) {
+    const b = a.slice();
+    for (let i = 1; i < n - 1; i++) {
+      for (let c = 0; c < 3; c++) {
+        b[i * 3 + c] = (a[(i - 1) * 3 + c] + 2 * a[i * 3 + c] + a[(i + 1) * 3 + c]) / 4;
+      }
+    }
+    a = b;
+  }
+  for (let i = 0; i < a.length; i++) a[i] = (i % 3 === 2) ? r2(a[i]) : r1(a[i]);
+  return a;
+}
 
 function widthAt(s, i) {
   if (!s.pressure) return s.size;

@@ -6,7 +6,7 @@ A sermon prep notebook for iPad and Apple Pencil. Type a passage, it pulls the t
 
 - **Fetch any passage** from Bible Gateway: NIV, ESV, NASB, CSB, NKJV, KJV. Or paste text, or start a blank page.
 - **Apple Pencil writes, finger scrolls.** Your palm is ignored while the Pencil is down.
-- **Pen** in 8 colours and 3 widths, pressure sensitive.
+- **Pen** in 8 colours and 3 widths, pressure sensitive, with **handwriting smoothing** (Off / Low / Med / High in Page options).
 - **Highlighter** in 6 colours. It sits behind the words, so the text stays crisp.
 - **Eraser** removes whole strokes.
 - **Text boxes** for typed notes. Drag them by the gold dot, delete with the ×. Scribble also works if you write into one with the Pencil.
