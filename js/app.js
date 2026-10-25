@@ -1,6 +1,7 @@
 import { Ink, PAGE_W } from './ink.js';
 import { fetchPassage, passageFromText } from './bible.js';
 import * as db from './db.js';
+import { exportPdf } from './pdf.js';
 
 const $ = id => document.getElementById(id);
 
@@ -106,13 +107,14 @@ async function showLibrary() {
   const list = (await db.allStudies()).sort((a, b) => b.updated - a.updated);
   const ul = $('studyList');
   ul.innerHTML = '';
-  $('emptyLib').hidden = list.length > 0;
+  $('studiesBlock').hidden = list.length === 0;
+  setGreeting();
   for (const s of list) {
     const li = document.createElement('li');
     li.className = 'study-item';
     const when = new Date(s.updated).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
     const sub = [s.passage.reference !== s.title ? s.passage.reference : '', s.passage.version, when].filter(Boolean).join(' · ');
-    li.innerHTML = `<div class="meta"><div class="title"></div><div class="sub"></div></div><button class="del" aria-label="Delete">Delete</button>`;
+    li.innerHTML = `<div class="meta"><div class="title"></div><div class="sub"></div></div><button class="del" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3"/></svg></button>`;
     li.querySelector('.title').textContent = s.title;
     li.querySelector('.sub').textContent = sub;
     li.addEventListener('click', e => {
@@ -258,7 +260,7 @@ function renderPassage() {
   const L = study.layout;
   let html = '';
   if (p.source !== 'blank') {
-    html += `<div class="ref-heading">${esc(p.reference)}${p.version ? `<span class="ref-version">${esc(p.version)}</span>` : ''}</div>`;
+    html += `<div class="ref-version">${esc(p.version || 'Passage')}</div><div class="ref-heading">${esc(p.reference)}</div><span class="ref-dash"></span>`;
     p.parts.forEach((part, i) => {
       if (p.parts.length > 1 && part.ref) html += `<h4 class="part-ref">${esc(part.ref)}</h4>`;
       html += part.html;
@@ -583,7 +585,43 @@ $('deleteStudyBtn').addEventListener('click', async () => {
   showLibrary();
 });
 
+// ---------- PDF ----------
+
+async function doExportPdf() {
+  if (!study) return;
+  $('menuPanel').hidden = true;
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  $('busy').hidden = false;
+  try {
+    await saveNow();
+    const blob = await exportPdf({ page, passageEl, strokes: ink.strokes, pageH: ink.pageH, title: study.title });
+    const name = (study.title || 'Study').replace(/[\\/:*?"<>|]+/g, '').trim() + '.pdf';
+    const file = new File([blob], name, { type: 'application/pdf' });
+    $('busy').hidden = true;
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  } catch (err) {
+    console.error(err);
+    toast('Could not make the PDF');
+  } finally {
+    $('busy').hidden = true;
+  }
+}
+$('pdfBtn').addEventListener('click', doExportPdf);
+$('pdfBtn2').addEventListener('click', doExportPdf);
+
 // ---------- misc ----------
+
+function setGreeting() {
+  const h = new Date().getHours();
+  $('greeting').textContent = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+}
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
