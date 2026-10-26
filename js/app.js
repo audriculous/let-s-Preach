@@ -85,6 +85,8 @@ const sheet = initSheet({
   pushAction: a => pushAction(a),
   setSplitMode: on => setSplitMode(on),
   isSplitMode: () => ink.tool === 'split',
+  pen: () => ({ color: prefs.color.pen, size: SIZES.pen[prefs.size.pen] ?? SIZES.pen[2], smoothing: prefs.smoothing }),
+  fingerDraw: () => prefs.fingerDraw,
 });
 const sync = initSync({
   settings, saveSettings,

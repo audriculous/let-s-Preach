@@ -6,6 +6,7 @@
 // so there is no library to load and it works offline.
 
 import { drawStroke, PAGE_W } from './ink.js';
+import { PAD_W } from './pad.js';
 
 const PAGE_H = Math.round(PAGE_W * 297 / 210); // A4 in logical px
 const RES = 2;                                  // canvas px per logical px
@@ -224,7 +225,9 @@ const TX = 90, TW = PAGE_W - 180, TOP = 90, BOTTOM = PAGE_H - 90;
 function layoutOutline(study) {
   const o = study.outline;
   if (!o) return [];
-  const hasContent = o.bigIdea || o.application || o.illustrations || (o.points || []).some(p => p.title || p.notes || p.verses);
+  const inked = k => o.pads && o.pads[k] && o.pads[k].strokes.length ? o.pads[k] : null;
+  const hasContent = o.bigIdea || o.application || o.illustrations || inked('application') || inked('illustrations') ||
+    (o.points || []).some(p => p.title || p.notes || p.verses || (p.subs || []).some(Boolean));
   if (!hasContent) return [];
   const blocks = [];
   const add = (style, text, gap = 0, indent = 0) => { if (text && String(text).trim()) blocks.push({ style, text: String(text), gap, indent }); };
@@ -235,16 +238,36 @@ function layoutOutline(study) {
   (o.points || []).forEach((p, i) => {
     add(T.point, `${i + 1}. ${p.title || 'Point ' + (i + 1)}`, i === 0 ? 34 : 24);
     add(T.muted, p.verses, 2, 34);
+    (p.subs || []).filter(Boolean).forEach((sub, j) => add(T.body, `${String.fromCharCode(97 + (j % 26))}.  ${sub}`, j ? 0 : 6, 34));
     add(T.body, p.notes, 6, 34);
   });
-  if (o.application) { add(T.eyebrow, 'Application', 34); add(T.body, o.application, 4); }
-  if (o.illustrations) { add(T.eyebrow, 'Illustrations', 30); add(T.body, o.illustrations, 4); }
+  const section = (label, key, gap) => {
+    const pad = inked(key);
+    if (!o[key] && !pad) return;
+    add(T.eyebrow, label, gap);
+    add(T.body, o[key], 4);
+    if (pad) blocks.push({ pad, gap: 8, indent: 0 });
+  };
+  section('Application', 'application', 34);
+  section('Illustrations', 'illustrations', 30);
 
   // Wrap into lines, then into pages.
   const ctx = document.createElement('canvas').getContext('2d');
   const pages = [[]];
   let y = TOP;
   for (const b of blocks) {
+    if (b.pad) {
+      // Handwriting: only as tall as the writing, scaled to the text width.
+      const k = TW / PAD_W;
+      let bottom = 0;
+      for (const st of b.pad.strokes) for (let i = 1; i < st.pts.length; i += 3) bottom = Math.max(bottom, st.pts[i]);
+      const h = (bottom + 16) * k;
+      y += b.gap;
+      if (y + h > BOTTOM && y > TOP) { pages.push([]); y = TOP; }
+      pages[pages.length - 1].push({ pad: b.pad, y, k });
+      y += h;
+      continue;
+    }
     ctx.font = b.style.font;
     const lines = wrap(ctx, b.style.upper ? b.text.toUpperCase() : b.text, TW - b.indent, b.style.spacing || 0);
     y += b.gap;
@@ -281,6 +304,15 @@ function renderTextPage(lines, footer) {
   ctx.setTransform(RES, 0, 0, RES, 0, 0);
   ctx.textBaseline = 'top';
   for (const l of lines) {
+    if (l.pad) {
+      ctx.save();
+      ctx.translate(TX, l.y);
+      ctx.scale(l.k, l.k);
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (const st of l.pad.strokes) drawStroke(ctx, st);
+      ctx.restore();
+      continue;
+    }
     ctx.font = l.style.font;
     ctx.fillStyle = l.style.color;
     const x = TX + l.indent;

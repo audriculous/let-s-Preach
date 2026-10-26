@@ -4,18 +4,19 @@
 
 import { walkVerses, passageContainer, suggestBreakup, rangeLabel, openingWords, pointStarts, diffWords, esc, seams, breakupOptions, sectionsFromCuts } from './verses.js';
 import { SECTION_COLORS } from './marks.js';
+import { Pad, emptyPad } from './pad.js';
 import { scanSensitive, CHECKLIST } from './checks.js';
 
 export const VERSIONS = ['NIV', 'ESV', 'NASB', 'NASB1995', 'CSB', 'NKJV', 'KJV', 'NLT', 'NRSVUE'];
 
 export function emptyOutline() {
-  return { bigIdea: '', points: [], application: '', illustrations: '', checks: {}, showOnPage: true };
+  return { bigIdea: '', points: [], application: '', illustrations: '', pads: {}, checks: {}, showOnPage: true };
 }
 
 const $ = id => document.getElementById(id);
 const pid = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
-export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toast, pushAction, setSplitMode, isSplitMode }) {
+export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toast, pushAction, setSplitMode, isSplitMode, pen, fingerDraw }) {
   const sheet = $('sheet');
   let tab = 'outline';
   let verses = [];
@@ -80,10 +81,14 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       <label class="opt-row"><span>Show the breakup on the page</span><input type="checkbox" class="switch" id="showBreakup"></label>
 
       <p class="eyebrow">Application</p>
-      <textarea class="field sheet-field" data-f="application" rows="3" placeholder="What does this mean on Monday for the young adults in the room?"></textarea>
+      <p class="hint">Write with the Pencil. What does this mean on Monday for the young adults in the room?</p>
+      ${o.application ? '<textarea class="field sheet-field" data-f="application" rows="2"></textarea>' : ''}
+      <div id="padApplication"></div>
 
       <p class="eyebrow">Illustrations</p>
-      <textarea class="field sheet-field" data-f="illustrations" rows="3" placeholder="Stories, pictures, quotes"></textarea>
+      <p class="hint">Write with the Pencil. Stories, pictures, quotes.</p>
+      ${o.illustrations ? '<textarea class="field sheet-field" data-f="illustrations" rows="2"></textarea>' : ''}
+      <div id="padIllustrations"></div>
 
       <p class="eyebrow">Before you preach</p>
       <div id="sensitivity"></div>
@@ -97,6 +102,13 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       autoGrow(t);
       t.addEventListener('input', () => { o[t.dataset.f] = t.value; autoGrow(t); save(); rescan(); });
     });
+    o.pads = o.pads || {};
+    for (const [key, id] of [['application', 'padApplication'], ['illustrations', 'padIllustrations']]) {
+      o.pads[key] = o.pads[key] || emptyPad();
+      const pad = new Pad($(id), o.pads[key], { onChange: save, pushAction, pen, fingerDraw });
+      requestAnimationFrame(() => pad.render());
+    }
+    keyboardOnPencil(pane.querySelector('[data-f=bigIdea]'));
     $('showBreakup').checked = o.showOnPage !== false;
     $('showBreakup').addEventListener('change', e => { o.showOnPage = e.target.checked; save(); marks.render(); });
     $('suggestBtn').addEventListener('click', suggest);
@@ -147,8 +159,13 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
           <button type="button" class="point-del" aria-label="Remove point">×</button>
         </div>
         <div class="point-start"></div>
+        <ul class="subs"></ul>
+        <button type="button" class="text-link sub-add">+ Sub-point</button>
         <textarea class="point-notes" rows="1" placeholder="Notes"></textarea>`;
       const title = li.querySelector('.point-title'), vv = li.querySelector('.point-verses'), notes = li.querySelector('.point-notes');
+      [title, vv, notes].forEach(keyboardOnPencil);
+      renderSubs(p, li.querySelector('.subs'));
+      li.querySelector('.sub-add').addEventListener('click', () => addSub(p, li.querySelector('.subs'), (p.subs || []).length));
       const start = li.querySelector('.point-start');
       title.value = p.title; vv.value = p.verses; notes.value = p.notes;
       const showStart = idx => {
@@ -166,7 +183,7 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
         renderStrip();
       });
       li.querySelector('.point-del').addEventListener('click', () => {
-        if ((p.title || p.notes) && !confirm(`Remove point ${i + 1}?`)) return;
+        if ((p.title || p.notes || (p.subs || []).some(Boolean)) && !confirm(`Remove point ${i + 1}?`)) return;
         const prev = clone(o.points);
         o.points.splice(i, 1);
         const next = clone(o.points);
@@ -177,9 +194,60 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     });
   }
 
+  // Sub-points: one line each. Return adds the next one, Backspace on an empty one removes it.
+  function renderSubs(p, ul) {
+    ul.innerHTML = '';
+    (p.subs || []).forEach((text, j) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="sub-mark">${String.fromCharCode(97 + (j % 26))}</span><input class="sub-input" placeholder="Sub-point" enterkeyhint="next">`;
+      const inp = li.querySelector('input');
+      inp.value = text;
+      keyboardOnPencil(inp);
+      inp.addEventListener('input', () => { p.subs[j] = inp.value; save(); rescan(); });
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); addSub(p, ul, j + 1); }
+        else if (e.key === 'Backspace' && !inp.value) {
+          e.preventDefault();
+          p.subs.splice(j, 1);
+          save();
+          renderSubs(p, ul);
+          const ins = ul.querySelectorAll('input');
+          if (ins[j - 1]) ins[j - 1].focus();
+        }
+      });
+      ul.appendChild(li);
+    });
+  }
+
+  function addSub(p, ul, at) {
+    p.subs = p.subs || [];
+    p.subs.splice(at, 0, '');
+    save();
+    renderSubs(p, ul);
+    ul.querySelectorAll('input')[at]?.focus();
+  }
+
+  // On iPad, a Pencil tap on a text box normally opens the small handwriting (Scribble)
+  // palette. Here a Pencil tap focuses the box directly, which brings up the keyboard.
+  function keyboardOnPencil(el) {
+    if (!el) return;
+    let pen = false;
+    el.addEventListener('touchstart', e => {
+      pen = [...e.changedTouches].some(t => t.touchType === 'stylus');
+      if (pen && document.activeElement !== el) e.preventDefault();
+    }, { passive: false });
+    el.addEventListener('touchend', e => {
+      if (!pen || document.activeElement === el) return;
+      e.preventDefault();
+      el.focus();
+      const n = el.value.length;
+      try { el.setSelectionRange(n, n); } catch {}
+    }, { passive: false });
+  }
+
   // ---------- playing with the breakup ----------
 
-  const clone = pts => pts.map(p => ({ ...p }));
+  const clone = pts => pts.map(p => ({ ...p, subs: p.subs ? p.subs.slice() : undefined }));
 
   // Where the current points start (as verse indexes), not counting the first verse.
   function currentCuts() {
@@ -204,6 +272,7 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       const into = secs.findIndex(sec => starts[k] >= sec.from && starts[k] <= sec.to);
       const t = pts[into];
       t.notes = [t.notes, [p.title, p.notes].filter(Boolean).join(': ')].filter(Boolean).join('\n');
+      if ((p.subs || []).some(Boolean)) t.subs = [...(t.subs || []), ...p.subs.filter(Boolean)];
     });
     return pts;
   }
@@ -309,7 +378,7 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     const s = study(), o = s.outline;
     const sources = [
       { where: 'Big idea', text: o.bigIdea },
-      ...o.points.flatMap((p, i) => [{ where: `Point ${i + 1}`, text: p.title + '\n' + p.notes }]),
+      ...o.points.flatMap((p, i) => [{ where: `Point ${i + 1}`, text: [p.title, ...(p.subs || []), p.notes].join('\n') }]),
       { where: 'Application', text: o.application },
       { where: 'Illustrations', text: o.illustrations },
       ...(s.notes || []).map(n => ({ where: 'Text box', text: n.text })),
@@ -331,11 +400,13 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     if (o.bigIdea) lines.push('BIG IDEA', o.bigIdea, '');
     o.points.forEach((p, i) => {
       lines.push(`${i + 1}. ${p.title || 'Point ' + (i + 1)}${p.verses ? ' (' + p.verses + ')' : ''}`);
+      (p.subs || []).filter(Boolean).forEach((sub, j) => lines.push(`   ${String.fromCharCode(97 + (j % 26))}. ${sub}`));
       if (p.notes) lines.push(p.notes.replace(/^/gm, '   '));
       lines.push('');
     });
-    if (o.application) lines.push('APPLICATION', o.application, '');
-    if (o.illustrations) lines.push('ILLUSTRATIONS', o.illustrations, '');
+    const inked = k => o.pads && o.pads[k] && o.pads[k].strokes.length;
+    if (o.application || inked('application')) lines.push('APPLICATION', o.application || '(handwritten, see the PDF)', '');
+    if (o.illustrations || inked('illustrations')) lines.push('ILLUSTRATIONS', o.illustrations || '(handwritten, see the PDF)', '');
     return lines.join('\n').trim() + '\n';
   }
 
