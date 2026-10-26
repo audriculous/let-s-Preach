@@ -8,6 +8,9 @@ import { WORD_RE, CONNECTIVES, normWord, isStopWord, walkVerses, pointStarts } f
 export const SPOT_COLORS = ['#2f5d8a', '#c62828', '#2e7d32', '#6a1b9a', '#e65100', '#00838f', '#ad1457', '#5d4037'];
 export const CONNECTIVE_COLOR = '#b07a12';
 export const BREAK_COLOR = '#e0a32e';
+// One colour per sermon point, shared by the page, the outline and the PDF.
+export const SECTION_COLORS = ['#e0a32e', '#4d7a66', '#2f5d8a', '#b5523b', '#7b5ea7', '#3f8c8c'];
+const DARK_TEXT = new Set(['#e0a32e']);
 
 const EXCLUDE = '.ref-version, .ref-heading, .footnotes, .copyright, sup, h3, h4, .chapternum';
 
@@ -75,6 +78,24 @@ export class Marks {
     return best;
   }
 
+  // The verse a tap on the page falls in (by reading order), as its key.
+  verseAt(x, y) {
+    const g = this._geom();
+    if (!g || !this.study) return null;
+    const verses = walkVerses(this.passageEl, this.study.passage.reference);
+    const lh = (parseFloat(this.passageEl.style.fontSize) || 26) * (parseFloat(this.passageEl.style.lineHeight) || 2);
+    let best = null;
+    for (const v of verses) {
+      const r = v.el.getBoundingClientRect();
+      if (!r.height) continue;
+      const mx = (r.left - g.r.left) / g.scale, my = (r.top + r.height / 2 - g.r.top) / g.scale;
+      const earlierLine = my < y - lh / 2;
+      const sameLine = Math.abs(my - y) <= lh / 2;
+      if (earlierLine || (sameLine && mx <= x + 12)) best = v.key;
+    }
+    return best;
+  }
+
   count(norm) {
     let n = 0;
     for (const w of this.words()) if (w.norm === norm) n++;
@@ -115,28 +136,31 @@ export class Marks {
       const verses = walkVerses(this.passageEl, s.passage.reference);
       const starts = pointStarts(o.points, verses);
       const left = parseFloat(this.passageEl.style.marginLeft) || 70;
-      const width = parseFloat(this.passageEl.style.width) || 560;
       const font = parseFloat(this.passageEl.style.fontSize) || 26;
-      starts.forEach((vi, i) => {
-        if (vi < 0) return;
-        const v = verses[vi];
-        const r = v.el.getBoundingClientRect();
-        if (!r.height) return;
-        const x = (r.left - g.r.left) / g.scale;
-        const top = (r.top - g.r.top) / g.scale - font * 0.2;
-        if (i > 0) {
-          const headed = v.heading && !this.passageEl.classList.contains('no-headings');
-          if (headed) { /* the heading already marks the break */ } else if (v.paraStart) items.push({ kind: 'line', x: left - 8, y: top - font * 0.45, w: width + 16, h: 0, color: BREAK_COLOR });
-          else items.push({ kind: 'cut', x: x - 7, y: top, w: 0, h: font * 1.45, color: BREAK_COLOR });
-        }
-        items.push({ kind: 'badge', x: Math.max(4, left - 52), y: top + font * 0.1, w: 34, h: 34, n: i + 1, color: BREAK_COLOR });
+      const lastWord = words[words.length - 1];
+      const textEnd = lastWord ? lastWord.y + lastWord.h + font * 0.3 : 0;
+      const tops = starts.map(vi => {
+        if (vi < 0) return null;
+        const r = verses[vi].el.getBoundingClientRect();
+        return r.height ? { vi, x: (r.left - g.r.left) / g.scale, y: (r.top - g.r.top) / g.scale - font * 0.2 } : null;
+      });
+      // Sections run in passage order, each down to where the next one starts.
+      const order = tops.map((t, i) => (t ? i : -1)).filter(i => i >= 0).sort((a, b) => tops[a].vi - tops[b].vi);
+      const bx = Math.max(4, left - 52);
+      order.forEach((i, k) => {
+        const t = tops[i], v = verses[t.vi];
+        const color = SECTION_COLORS[i % SECTION_COLORS.length];
+        const next = order[k + 1] != null ? tops[order[k + 1]].y - font * 0.35 : textEnd;
+        if (next - t.y > 40) items.push({ kind: 'band', x: bx + 15, y: t.y + 40, w: 4, h: next - t.y - 44, color });
+        if (k > 0 && !v.paraStart) items.push({ kind: 'cut', x: t.x - 7, y: t.y, w: 0, h: font * 1.45, color });
+        items.push({ kind: 'badge', x: bx, y: t.y + font * 0.1, w: 34, h: 34, n: i + 1, color, light: !DARK_TEXT.has(color) });
       });
     }
 
     this.items = items;
     this.layer.innerHTML = items.map(it => {
       const pos = `left:${it.x.toFixed(1)}px;top:${it.y.toFixed(1)}px;width:${it.w.toFixed(1)}px;height:${it.h.toFixed(1)}px;--c:${it.color}`;
-      if (it.kind === 'badge') return `<div class="mk-badge" data-n="${it.n}" style="${pos}"></div>`;
+      if (it.kind === 'badge') return `<div class="mk-badge${it.light ? ' light' : ''}" data-n="${it.n}" style="${pos}"></div>`;
       return `<div class="mk-${it.kind}" style="${pos}"></div>`;
     }).join('');
   }

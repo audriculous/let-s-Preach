@@ -71,6 +71,7 @@ const ink = new Ink({
   onWordTap: (x, y) => spotWordAt(x, y),
   onNearBottom: () => { study.extraSpace += 600; relayout(); },
 });
+window.__ink = ink; // handy for debugging from the console
 const ruler = new Ruler(ink, pageBox);
 ink.ruler = ruler;
 const marks = new Marks({ page, passageEl, layer: $('marks') });
@@ -81,6 +82,9 @@ const sheet = initSheet({
   fetchPassage,
   getWorker: () => settings.workerUrl,
   toast,
+  pushAction: a => pushAction(a),
+  setSplitMode: on => setSplitMode(on),
+  isSplitMode: () => ink.tool === 'split',
 });
 const sync = initSync({
   settings, saveSettings,
@@ -512,8 +516,27 @@ $('redoBtn').addEventListener('click', redo);
 
 // ---------- tools ----------
 
+// Split mode: tap a verse on the page to split the passage there (or join it again).
+function setSplitMode(on) {
+  if (on) {
+    ink.clearSelection();
+    ink.tool = 'split';
+    document.querySelectorAll('.tool').forEach(b => b.classList.remove('active'));
+    $('spotBar').hidden = true;
+    $('colorGroup').hidden = $('sizeGroup').hidden = true;
+    scroller.classList.add('allow-pan');
+    $('study').classList.add('split-mode');
+    toast('Tap a verse on the page to split before it. Tap again to join.');
+  } else if (ink.tool === 'split') {
+    $('study').classList.remove('split-mode');
+    setTool(prefs.tool);
+  }
+  sheet.syncSplitButton();
+}
+
 function setTool(tool) {
   if (!document.querySelector(`.tool[data-tool="${tool}"]`)) tool = 'pen';
+  $('study').classList.remove('split-mode');
   prefs.tool = tool;
   savePrefs();
   document.querySelectorAll('.tool').forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
@@ -525,6 +548,7 @@ function setTool(tool) {
   $('menuPanel').hidden = true;
   if (tool !== 'text' && document.activeElement && document.activeElement.classList.contains('note')) document.activeElement.blur();
   ink.tool = tool;
+  sheet.syncSplitButton();
   renderColors();
   renderSizes();
   applyToolStyle();
@@ -623,6 +647,11 @@ function setSpots(next, connectives = study.connectives) {
 }
 
 function spotWordAt(x, y) {
+  if (ink.tool === 'split') {
+    const key = marks.verseAt(x, y);
+    if (key) sheet.splitAtKey(key);
+    return;
+  }
   const w = marks.wordAt(x, y);
   if (!w) return;
   toggleSpot(w.norm, w.lower === 'god' || w.lower === 'lord' ? w.text : w.lower);

@@ -530,3 +530,42 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
 .dialog-inner .card-title + .field { margin-top: 2px; }
 .dialog-inner > .card-title:not(:first-of-type) { margin-top: 14px; }
 .dialog { max-height: calc(100dvh - 32px); overflow-y: auto; }
+
+/* ---------- Breakup explorer ---------- */
+.mk-band { background: var(--c); border-radius: 2px; opacity: .55; }
+.mk-badge.light { color: #fff; }
+.point-num { background: var(--c, var(--accent)); }
+.point-num[style*="#e0a32e"] { color: var(--accent-ink); }
+.point-num:not([style*="#e0a32e"]) { color: #fff; }
+.strip { display: flex; flex-wrap: wrap; gap: 4px 0; margin: 6px 0 2px; }
+.vchip {
+  position: relative; min-width: 38px; height: 46px; padding: 12px 6px 0; border: 0; margin: 0;
+  background: color-mix(in srgb, var(--c, var(--chip-line)) 24%, var(--card));
+  font-family: var(--display); font-weight: 800; font-style: italic; font-size: 18px; cursor: pointer;
+  border-left: 3px solid transparent;
+}
+.vchip.first, .vchip.cut { border-top-left-radius: 12px; border-bottom-left-radius: 12px; margin-left: 6px; }
+.vchip.first { margin-left: 0; }
+.vchip.cut { border-left-color: var(--ink); }
+.vchip:has(+ .vchip.cut), .vchip:last-child { border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
+.vchip .seam { position: absolute; top: 3px; left: 0; right: 0; text-align: center; font-size: 12px; line-height: 1; color: var(--ink); letter-spacing: 1px; font-style: normal; }
+.vchip:active { filter: brightness(.92); }
+.strip-note { min-height: 1.3em; margin: 4px 0 0; font-size: 14px; color: var(--label); font-weight: 600; }
+.sheet-row.tight { margin: 4px 0 2px; }
+.sheet-row.tight .chip-btn { margin-top: 0; }
+#splitModeBtn.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.eyebrow.sub { font-size: 11px !important; margin: 14px 0 6px !important; }
+.options { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.option {
+  text-align: left; border: 1.5px solid var(--chip-line); background: var(--card); border-radius: 16px;
+  padding: 10px 12px; cursor: pointer; display: grid; gap: 6px;
+}
+.option.on { border-color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); background: var(--accent-soft); }
+.option-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.option-head b { font-family: var(--display); font-style: italic; font-weight: 800; font-size: 19px; text-transform: uppercase; }
+.option-head span { font-size: 13px; color: var(--muted); font-weight: 600; }
+.option-bar { display: flex; gap: 2px; height: 8px; }
+.option-bar span { background: var(--c); border-radius: 3px; }
+.option-ranges { font-size: 13px; font-weight: 600; color: var(--ink); }
+.option-why { font-size: 12.5px; color: var(--muted); line-height: 1.35; }
+.split-mode .passage sup.versenum, .split-mode .passage .chapternum { outline: 2px dashed var(--accent); outline-offset: 2px; border-radius: 4px; }

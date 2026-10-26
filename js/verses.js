@@ -119,55 +119,87 @@ export function pointStarts(points, verses) {
   });
 }
 
-const OPENERS = /^["“‘']?(therefore|but|so|now|then|for|what|thus|again|finally|likewise|after|when|in the same way|because)\b/i;
+const OPENERS = /^["“‘']?(therefore|but now|but|so then|so|now|then|for this reason|what then|what|thus|again|finally|likewise|after this|when|in the same way|because)\b/i;
 
-// Suggest where to split a passage into 2 to 4 sections, using the translators'
-// headings, paragraph breaks and words like "therefore" that open a new move.
-export function suggestBreakup(verses) {
-  const n = verses.length;
-  if (!n) return [];
-  if (n < 4) return [{ from: 0, to: n - 1 }];
-
-  const strength = verses.map((x, i) => {
-    if (i === 0) return 0;
+// How natural a place each verse is to start a new section, and why.
+export function seams(verses) {
+  return verses.map((x, i) => {
+    const why = [];
     let s = 0;
-    if (x.heading) s += 3;
-    if (x.paraStart) s += 1;
-    if (x.paraStart && OPENERS.test(x.text)) s += 1;
-    if (x.v === 1) s += 1;
-    return s;
+    if (i === 0) return { s: 0, why };
+    if (x.heading) { s += 3; why.push('heading: ' + x.heading); }
+    if (x.paraStart) { s += 1; why.push('new paragraph'); }
+    const m = x.text.match(OPENERS);
+    if (m) { s += x.paraStart ? 1 : 0.5; why.push('starts with “' + m[1].toLowerCase() + '”'); }
+    if (x.v === 1) { s += 1; why.push('new chapter'); }
+    return { s, why, opener: m ? m[1].toLowerCase() : '' };
   });
+}
 
-  let cuts;
-  const headed = strength.map((s, i) => (verses[i].heading && i > 0 ? i : -1)).filter(i => i > 0);
-  if (headed.length >= 1 && headed.length <= 4) {
-    cuts = headed;
-  } else {
-    const k = Math.max(2, Math.min(4, Math.round(n / 7)));
-    const span = n / k;
-    cuts = [];
-    let last = 0;
-    for (let j = 1; j < k; j++) {
-      const ideal = j * span;
-      let best = -1, bestScore = -Infinity;
-      for (let i = last + 1; i < n; i++) {
-        const score = strength[i] - 2.2 * Math.abs(i - ideal) / span;
-        if (score > bestScore) { bestScore = score; best = i; }
-      }
-      if (bestScore < -1) best = Math.max(last + 1, Math.round(ideal));
-      if (best <= last || best >= n) continue;
-      cuts.push(best);
-      last = best;
-    }
-  }
-
+export function sectionsFromCuts(cuts, n) {
   const out = [];
   let from = 0;
-  for (const c of [...cuts, n]) {
+  for (const c of [...[...new Set(cuts)].filter(c => c > 0 && c < n).sort((a, b) => a - b), n]) {
     if (c > from) out.push({ from, to: c - 1 });
     from = c;
   }
   return out;
+}
+
+// The best k-part split: cuts land on strong seams, close to evenly spaced.
+function bestCuts(verses, k, S = seams(verses)) {
+  const n = verses.length, span = n / k;
+  const cuts = [];
+  let last = 0;
+  for (let j = 1; j < k; j++) {
+    const ideal = j * span;
+    let best = -1, bestScore = -Infinity;
+    for (let i = last + 1; i < n - (k - 1 - j); i++) {
+      const score = S[i].s - 2.2 * Math.abs(i - ideal) / span;
+      if (score > bestScore) { bestScore = score; best = i; }
+    }
+    if (bestScore < -1) best = Math.max(last + 1, Math.round(ideal));
+    if (best <= last || best >= n) continue;
+    cuts.push(best);
+    last = best;
+  }
+  return cuts;
+}
+
+// Several different ways to break the passage up, to compare and play with.
+export function breakupOptions(verses) {
+  const n = verses.length;
+  if (n < 2) return [];
+  const S = seams(verses);
+  const opts = [];
+  const add = (label, why, cuts) => {
+    cuts = [...new Set(cuts)].filter(c => c > 0 && c < n).sort((a, b) => a - b);
+    if (!cuts.length) return;
+    const key = cuts.join(',');
+    if (opts.some(o => o.key === key)) return;
+    opts.push({ label, why, cuts, key });
+  };
+  const idx = f => verses.map((_, i) => i).filter(i => i > 0 && f(i));
+  const heads = idx(i => verses[i].heading);
+  if (heads.length) add('Headings', 'Where the translators put section headings', heads);
+  const turns = idx(i => S[i].opener && (verses[i].paraStart || /^(therefore|but now|so then|what then|for this reason|finally)$/.test(S[i].opener)));
+  if (turns.length && turns.length <= 6) add('Turning words', 'Where a new move opens with "therefore", "but", "so" and similar', turns);
+  const paras = idx(i => verses[i].paraStart);
+  if (paras.length && paras.length <= 7) add('Paragraphs', 'At every paragraph break', paras);
+  const chapters = idx(i => verses[i].v === 1);
+  if (chapters.length) add('Chapters', 'At the chapter break', chapters);
+  for (const k of [2, 3, 4]) if (n >= k * 2) add(k + ' points', `The ${k} most natural seams, roughly even in length`, bestCuts(verses, k, S));
+  return opts;
+}
+
+// The default suggestion (kept for the "Suggest a breakup" button).
+export function suggestBreakup(verses) {
+  const n = verses.length;
+  if (!n) return [];
+  if (n < 4) return [{ from: 0, to: n - 1 }];
+  const heads = verses.map((x, i) => (x.heading && i > 0 ? i : -1)).filter(i => i > 0);
+  const cuts = heads.length >= 1 && heads.length <= 4 ? heads : bestCuts(verses, Math.max(2, Math.min(4, Math.round(n / 7))));
+  return sectionsFromCuts(cuts, n);
 }
 
 // HTML of `other` with the words that differ from `base` wrapped in <mark>.

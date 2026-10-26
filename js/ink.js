@@ -54,6 +54,7 @@ export class Ink {
     this.selection = null;  // { strokes, box }
     this.dragging = null;   // moving or resizing the selection
     this.penDown = false;
+    this.lastPenAt = -1e9;  // last time the Pencil touched or hovered
     this.rafPending = false;
 
     this._bind();
@@ -263,7 +264,10 @@ export class Ink {
       for (const t of e.touches) {
         if (t.touchType === 'stylus') { e.preventDefault(); return; }
       }
-      if (this.tool === 'spot') return; // fingers tap words and still scroll
+      // A hand resting on the screen just after (or while hovering) the Pencil is a palm,
+      // not a scroll: stop it moving the page under your writing.
+      if (e.type === 'touchstart' && performance.now() - this.lastPenAt < PALM_MS) { e.preventDefault(); return; }
+      if (this.tool === 'spot' || this.tool === 'split') return; // fingers tap words and still scroll
       // A finger that lands on a lasso selection moves it instead of scrolling.
       if (this.selection && e.type === 'touchstart' && e.touches.length === 1 && this._selHit(this._point(e.touches[0]))) { e.preventDefault(); return; }
       if (this.dragging) { e.preventDefault(); return; }
@@ -301,11 +305,12 @@ export class Ink {
   }
 
   _down(e) {
+    if (e.pointerType === 'pen') this.lastPenAt = performance.now();
     if (this.tool === 'hand') return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if (e.target.closest && e.target.closest('.note-wrap, .sel-bar')) return;
 
-    if (this.tool === 'spot') {
+    if (this.tool === 'spot' || this.tool === 'split') {
       this.tap = { id: e.pointerId, x: e.clientX, y: e.clientY, pt: this._point(e), kind: 'word' };
       return;
     }
@@ -374,6 +379,7 @@ export class Ink {
   }
 
   _move(e) {
+    if (e.pointerType === 'pen') this.lastPenAt = performance.now();
     if (this.dragging && e.pointerId === this.dragging.id) {
       e.preventDefault();
       this._dragTo(this._point(e));
@@ -432,7 +438,7 @@ export class Ink {
   }
 
   _up(e, cancelled) {
-    if (e.pointerType === 'pen') this.penDown = false;
+    if (e.pointerType === 'pen') { this.penDown = false; this.lastPenAt = performance.now(); }
 
     if (this.tap && e.pointerId === this.tap.id) {
       const moved = Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y);
@@ -482,7 +488,7 @@ export class Ink {
 
     // Scribble to erase: a tight back-and-forth pen stroke over existing ink removes that ink.
     if (this.scribbleErase && a.tool === 'pen' && !a.snapped && !a.kind && !a.ruled && isScribble(a.pts)) {
-      const victims = this.strokes.filter(s => scribbleCovers(stroke, s));
+      const victims = scribbleVictims(stroke, this.strokes);
       if (victims.length) {
         this._liveEnd();
         this._eraseList(victims, stroke.bbox);
@@ -754,6 +760,7 @@ const STREAM = [1, 0.62, 0.46, 0.33];
 
 // Hold to snap: how long the Pencil must rest, and how far it may drift (logical px).
 const HOLD_MS = 550;
+const PALM_MS = 700; // how long after the Pencil a new touch counts as your palm
 const HOLD_SLOP = 4;
 const AXIS_SNAP_DEG = 5;
 
@@ -829,40 +836,72 @@ function recognise(P, raw) {
   return { type: 'oval', cx, cy, rx, ry, ang };
 }
 
-// A scribble is a compact stroke that keeps doubling back on itself.
-function isScribble(P) {
-  const n = P.length / 3;
-  if (n < 8) return null;
-  // Resample every ~5px so slow and fast strokes count the same.
-  const pts = [[P[0], P[1]]];
-  let len = 0, minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (let i = 0; i < n; i++) {
-    const x = P[i * 3], y = P[i * 3 + 1];
-    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-    const [lx, ly] = pts[pts.length - 1];
-    const d = Math.hypot(x - lx, y - ly);
-    if (d >= 5) { pts.push([x, y]); len += d; }
+// Points every `step` logical px along a stroke (interpolated, so long fast segments
+// are measured the same as slow ones).
+function resample(P, step) {
+  const out = [[P[0], P[1]]];
+  let carry = 0;
+  for (let i = 3; i < P.length; i += 3) {
+    let x0 = P[i - 3], y0 = P[i - 2];
+    const x1 = P[i], y1 = P[i + 1];
+    let d = Math.hypot(x1 - x0, y1 - y0);
+    while (carry + d >= step) {
+      const t = (step - carry) / d;
+      x0 += (x1 - x0) * t; y0 += (y1 - y0) * t;
+      out.push([x0, y0]);
+      d = Math.hypot(x1 - x0, y1 - y0);
+      carry = 0;
+    }
+    carry += d;
   }
-  const big = Math.max(maxX - minX, maxY - minY);
-  if (len < 70 || big < 12 || len < 3 * big) return false;
+  return out;
+}
+
+// A scribble is a compact stroke that keeps doubling back on itself, tightly.
+function isScribble(P) {
+  if (P.length / 3 < 6) return false;
+  const pts = resample(P, 4);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of pts) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+  const len = (pts.length - 1) * 4, big = Math.max(maxX - minX, maxY - minY);
+  if (len < 90 || big < 12 || len < 3.5 * big) return false;
   let reversals = 0;
   for (let i = 2; i < pts.length - 2; i++) {
     const ax = pts[i][0] - pts[i - 2][0], ay = pts[i][1] - pts[i - 2][1];
     const bx = pts[i + 2][0] - pts[i][0], by = pts[i + 2][1] - pts[i][1];
     const cos = (ax * bx + ay * by) / ((Math.hypot(ax, ay) * Math.hypot(bx, by)) || 1);
-    if (cos < -0.5) { reversals++; i += 2; } // one sharp turn counts once
+    if (cos < -0.6) { reversals++; i += 2; } // one sharp turn counts once
   }
-  return reversals >= 4;
+  return reversals >= 5;
 }
 
-// Does the scribble touch stroke s (or sit right over a small mark)?
-function scribbleCovers(scr, s) {
-  const a = scr.bbox, b = s.bbox;
-  if (b[2] < a[0] || b[0] > a[2] || b[3] < a[1] || b[1] > a[3]) return false;
-  if (b[0] >= a[0] && b[2] <= a[2] && b[1] >= a[1] && b[3] <= a[3]) return true; // fully inside
-  const P = scr.pts, r = scr.size / 2 + s.size / 2 + 3;
-  for (let i = 0; i < P.length; i += 3) if (hitStroke(s, P[i], P[i + 1], r)) return true;
-  return false;
+// Which pen marks does a scribble rub out? Only when the scribble is drawn on top of
+// existing ink (handwriting goes beside other words, a scribble goes over them), and
+// only the marks it mostly covers. Highlights are never rubbed out by scribbling, so
+// writing over a highlight is always safe.
+function scribbleVictims(scr, strokes) {
+  const b = scr.bbox;
+  const pen = strokes.filter(s => s.tool !== 'highlighter' &&
+    !(s.bbox[2] < b[0] || s.bbox[0] > b[2] || s.bbox[3] < b[1] || s.bbox[1] > b[3]));
+  if (!pen.length) return [];
+  const S = resample(scr.pts, 4);
+  let on = 0;
+  for (const [x, y] of S) {
+    if (pen.some(s => x > s.bbox[0] - 8 && x < s.bbox[2] + 8 && y > s.bbox[1] - 8 && y < s.bbox[3] + 8 && hitStroke(s, x, y, 6 + s.size))) on++;
+  }
+  if (on / S.length < 0.3) return [];
+  const R2 = (10 + scr.size) ** 2;
+  const covered = s => {
+    const P = s.pts, n = P.length / 3, step = Math.max(1, Math.floor(n / 24));
+    let c = 0, t = 0;
+    for (let i = 0; i < n; i += step) {
+      t++;
+      const x = P[i * 3], y = P[i * 3 + 1];
+      if (S.some(([sx, sy]) => (sx - x) ** 2 + (sy - y) ** 2 <= R2)) c++;
+    }
+    return t ? c / t : 0;
+  };
+  return pen.filter(s => covered(s) >= 0.5);
 }
 
 function shapePoints(sh, p) {

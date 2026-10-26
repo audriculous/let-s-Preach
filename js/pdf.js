@@ -190,6 +190,8 @@ function drawMarks(ctx, marks, inSlice) {
       ctx.globalAlpha = 1; ctx.strokeStyle = m.color; ctx.lineWidth = 2.5; ctx.stroke();
     } else if (m.kind === 'under') {
       ctx.fillStyle = m.color; roundRect(ctx, m.x, m.y, m.w, m.h, 2); ctx.fill();
+    } else if (m.kind === 'band') {
+      ctx.globalAlpha = 0.55; ctx.fillStyle = m.color; roundRect(ctx, m.x, m.y, m.w, m.h, 2); ctx.fill();
     } else if (m.kind === 'cut') {
       ctx.fillStyle = m.color; roundRect(ctx, m.x - 2, m.y, 4, m.h, 2); ctx.fill();
     } else if (m.kind === 'line') {
@@ -199,7 +201,7 @@ function drawMarks(ctx, marks, inSlice) {
       const r = m.w / 2;
       ctx.fillStyle = m.color;
       ctx.beginPath(); ctx.arc(m.x + r, m.y + r, r, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#1a1a1a';
+      ctx.fillStyle = m.light ? '#ffffff' : '#1a1a1a';
       ctx.font = `italic 900 22px 'Barlow Condensed', sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(String(m.n), m.x + r, m.y + r + 1);
