@@ -39,6 +39,13 @@ export class Ink {
     this.ruler = null;         // set by the app; strokes that start beside it run along its edge
 
     this.tiles = new Map(); // index -> { hl, ink }
+    // The stroke being written is redrawn whole every frame on its own canvas (one per
+    // layer, so a live highlight already sits behind the words), then laid onto the tiles.
+    this.live = { hl: makeCanvas('tile live'), ink: makeCanvas('tile live') };
+    this.live.hl.hidden = this.live.ink.hidden = true;
+    hlLayer.appendChild(this.live.hl);
+    inkLayer.appendChild(this.live.ink);
+    this.liveRaf = 0;
     this.pool = [];
     this.active = null;     // stroke being drawn
     this.erasing = null;    // { pointerId, removed: [] }
@@ -190,18 +197,20 @@ export class Ink {
 
   _acquire(i) {
     const t = this.pool.pop() || { hl: makeCanvas('tile hl'), ink: makeCanvas('tile ink') };
-    const k = this.scale * this.dpr();
+    // Tiles start and end on whole device pixels, so ink is never resampled (and softened)
+    // between the live canvas and the page.
+    const dpr = this.dpr(), k = this.scale * dpr;
     const wPx = Math.round(PAGE_W * k);
-    const hPx = Math.round(TILE_H * k);
+    const y0 = Math.round(i * TILE_H * k), hPx = Math.round((i + 1) * TILE_H * k) - y0;
     for (const c of [t.hl, t.ink]) {
       if (c.width !== wPx) c.width = wPx;
       if (c.height !== hPx) c.height = hPx;
-      c.style.width = PAGE_W * this.scale + 'px';
-      c.style.height = TILE_H * this.scale + 'px';
-      c.style.top = i * TILE_H * this.scale + 'px';
+      c.style.width = wPx / dpr + 'px';
+      c.style.height = hPx / dpr + 'px';
+      c.style.top = y0 / dpr + 'px';
     }
-    if (!t.hl.parentNode) this.hlLayer.appendChild(t.hl);
-    if (!t.ink.parentNode) this.inkLayer.appendChild(t.ink);
+    if (!t.hl.parentNode) this.hlLayer.insertBefore(t.hl, this.live.hl); // keep the live stroke on top
+    if (!t.ink.parentNode) this.inkLayer.insertBefore(t.ink, this.live.ink);
     t.index = i;
     return t;
   }
@@ -214,7 +223,7 @@ export class Ink {
   _ctx(canvas, i) {
     const ctx = canvas.getContext('2d');
     const k = this.scale * this.dpr();
-    ctx.setTransform(k, 0, 0, k, 0, -i * TILE_H * k);
+    ctx.setTransform(k, 0, 0, k, 0, -Math.round(i * TILE_H * k));
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     return ctx;
@@ -340,6 +349,7 @@ export class Ink {
         pressure: false, kind: this.shapeKind, poly: this.shapeKind !== 'oval',
         x0: x, y0: y, pts: [r1(x), r1(y), 0.5],
       };
+      this._liveBegin(this.active);
       return;
     }
 
@@ -355,12 +365,12 @@ export class Ink {
       size,
       pressure: e.pointerType === 'pen' && !isHl,
       pts: [r1(x), r1(y), r2(p)],
-      lastP: p,
+      sm: ruled ? 0 : this.smoothing,
       ruled,
-      sx: x, sy: y,           // stabilised pen position
-      raw: [x, y, p],         // last unsmoothed sample, so the stroke ends where the Pencil lifted
+      raw: [x, y, p],         // latest sample, so the stroke always ends at the Pencil
+      pred: [],
     };
-    this._drawLive(true);
+    this._liveBegin(this.active);
   }
 
   _move(e) {
@@ -389,11 +399,10 @@ export class Ink {
       const [x, y] = this._point(e);
       const before = bboxOf(a);
       a.pts = dragShape(a.kind, a.x0, a.y0, x, y, a.size);
-      this._repaintActive(before);
+      this._requestLive();
       return;
     }
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-    const base = FOLLOW[this.smoothing] ?? 1, reach = REACH[this.smoothing] ?? 1;
     for (const ev of (evs.length ? evs : [e])) {
       let [x, y, p] = this._point(ev);
       if (a.ruled) [x, y] = project(a.ruled, x, y);
@@ -403,25 +412,23 @@ export class Ink {
         if (a.snapped.type === 'line') this._dragLineEnd(x, y);
         continue;
       }
-      if (!a.ruled) {
-        this._armHold(x, y);
-        // Live stabiliser: slow, careful strokes are smoothed the most; quick ones follow
-        // the Pencil closely so the line never lags far behind. What you see while writing
-        // is exactly what stays on the page.
-        const lag = Math.hypot(x - a.sx, y - a.sy);
-        const follow = base + (1 - base) * Math.min(1, lag / reach);
-        a.sx += (x - a.sx) * follow;
-        a.sy += (y - a.sy) * follow;
-        x = a.sx; y = a.sy;
-      }
+      if (!a.ruled) this._armHold(x, y);
+      // Keep every real sample (smoothing happens when drawing, without lag).
       const n = a.pts.length;
       const dx = x - a.pts[n - 3], dy = y - a.pts[n - 2];
-      if (dx * dx + dy * dy < 0.6) continue; // skip jitter
-      p = a.lastP * 0.6 + p * 0.4;            // smooth pressure
-      a.lastP = p;
+      if (dx * dx + dy * dy < 0.25) continue; // sub-pixel jitter
       a.pts.push(r1(x), r1(y), r2(p));
-      this._drawLive(false);
     }
+    // Where the system expects the Pencil to be next frame, drawn but never kept.
+    a.pred = [];
+    if (!a.snapped && e.getPredictedEvents) {
+      for (const ev of e.getPredictedEvents().slice(0, 3)) {
+        let [x, y, p] = this._point(ev);
+        if (a.ruled) [x, y] = project(a.ruled, x, y);
+        a.pred.push(x, y, p);
+      }
+    }
+    this._requestLive();
   }
 
   _up(e, cancelled) {
@@ -466,37 +473,31 @@ export class Ink {
     const pts = a.pts;
     if (a.kind) {
       const b = bboxOf(a);
-      if (b[2] - b[0] < a.size * 2.4 + 6 && b[3] - b[1] < a.size * 2.4 + 6) { // a tap, not a shape
-        if (a.paintedBox) this.redrawRegion(a.paintedBox);
-        return;
-      }
-    } else if (a.raw && !a.snapped && !cancelled) {
-      // Finish at the point where the Pencil lifted, drawn live so nothing shifts afterwards.
-      const n = pts.length;
-      const [rx, ry, rp] = a.raw;
-      if ((rx - pts[n - 3]) ** 2 + (ry - pts[n - 2]) ** 2 > 0.6) {
-        pts.push(r1(rx), r1(ry), r2(a.lastP * 0.6 + rp * 0.4));
-        this._drawLive(false, a);
-      }
+      if (b[2] - b[0] < a.size * 2.4 + 6 && b[3] - b[1] < a.size * 2.4 + 6) { this._liveEnd(); return; } // a tap, not a shape
     }
-    const liveBox = union(bboxOf({ pts, size: a.size }), a.paintedBox || bboxOf({ pts, size: a.size })); // where the live preview was painted
     const stroke = { id: a.id, tool: a.tool, color: a.color, size: a.size, pressure: a.pressure, pts };
     if (a.poly) stroke.poly = true;
+    if (a.sm && !a.snapped) stroke.sm = a.sm;
     stroke.bbox = bboxOf(stroke);
 
     // Scribble to erase: a tight back-and-forth pen stroke over existing ink removes that ink.
     if (this.scribbleErase && a.tool === 'pen' && !a.snapped && !a.kind && !a.ruled && isScribble(a.pts)) {
       const victims = this.strokes.filter(s => scribbleCovers(stroke, s));
       if (victims.length) {
-        this._eraseList(victims, liveBox);
+        this._liveEnd();
+        this._eraseList(victims, stroke.bbox);
         return;
       }
     }
 
+    // Lay the finished stroke onto the page exactly as it was drawn live, then drop the live copy.
     this.strokes.push(stroke);
-    const b = stroke.bbox;
-    // Repaint the area cleanly (same stroke, so nothing visibly changes).
-    this.redrawRegion([Math.min(b[0], liveBox[0]), Math.min(b[1], liveBox[1]), Math.max(b[2], liveBox[2]), Math.max(b[3], liveBox[3])]);
+    const b = stroke.bbox, layer = stroke.tool === 'highlighter' ? 'hl' : 'ink';
+    for (const [i, t] of this.tiles) {
+      const y0 = i * TILE_H;
+      if (b[3] >= y0 && b[1] <= y0 + TILE_H) drawStroke(this._ctx(t[layer], i), stroke);
+    }
+    this._liveEnd();
     this.onAction({
       undo: () => this.removeStrokes([stroke], false),
       redo: () => this.addStroke(stroke, false),
@@ -658,54 +659,63 @@ export class Ink {
     if (!a || a.snapped) return;
     const shape = recognise(a.pts, a.raw);
     if (!shape) return;
-    const before = bboxOf({ pts: a.pts, size: a.size });
     a.snapped = shape;
+    a.pred = [];
     a.pts = shapePoints(shape, avgPressure(a.pts));
-    this._repaintActive(before);
+    this._requestLive();
   }
 
   _dragLineEnd(x, y) {
     const a = this.active, L = a.snapped;
-    const before = bboxOf({ pts: a.pts, size: a.size });
     [L.x1, L.y1] = straighten(L.x0, L.y0, x, y);
     a.pts = shapePoints(L, a.pts[2]);
-    this._repaintActive(before);
+    this._requestLive();
   }
 
-  // Wipe the old preview and paint the active stroke whole.
-  _repaintActive(prevBox) {
+  // ---------- live stroke ----------
+
+  // Cover the visible part of the page with the live canvas for the active stroke's layer.
+  _liveBegin(a) {
+    const c = this.live[a.tool === 'highlighter' ? 'hl' : 'ink'];
+    const sc = this.scroller.getBoundingClientRect(), pb = this.pageBox.getBoundingClientRect();
+    const left = Math.max(sc.left, pb.left), top = Math.max(sc.top, pb.top);
+    const w = Math.max(1, Math.min(sc.right, pb.right) - left), h = Math.max(1, Math.min(sc.bottom, pb.bottom) - top);
+    const dpr = this.dpr();
+    const W = Math.round(w * dpr), H = Math.round(h * dpr);
+    if (c.width !== W) c.width = W;
+    if (c.height !== H) c.height = H;
+    const dx = Math.round((left - pb.left) * dpr), dy = Math.round((top - pb.top) * dpr); // whole device px
+    c.style.width = W / dpr + 'px'; c.style.height = H / dpr + 'px';
+    c.style.left = dx / dpr + 'px'; c.style.top = dy / dpr + 'px';
+    c.hidden = false;
+    a.live = { c, ctx: c.getContext('2d', { desynchronized: true }), dx, dy, dpr };
+    this._liveDraw();
+  }
+
+  _requestLive() {
+    if (this.liveRaf) return;
+    this.liveRaf = requestAnimationFrame(() => { this.liveRaf = 0; this._liveDraw(); });
+  }
+
+  _liveDraw() {
     const a = this.active;
-    const nb = bboxOf({ pts: a.pts, size: a.size });
-    a.paintedBox = union(a.paintedBox || prevBox, union(prevBox, nb));
-    this.redrawRegion(union(prevBox, nb));
-    const layer = a.tool === 'highlighter' ? 'hl' : 'ink';
-    for (const [i, t] of this.tiles) {
-      const y0 = i * TILE_H;
-      if (nb[3] < y0 || nb[1] > y0 + TILE_H) continue;
-      drawStroke(this._ctx(t[layer], i), a);
-    }
+    if (!a || !a.live) return;
+    const { c, ctx, dx, dy, dpr } = a.live;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, c.width, c.height);
+    const k = this.scale * dpr;
+    ctx.setTransform(k, 0, 0, k, -dx, -dy);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    drawStroke(ctx, a.pred && a.pred.length ? { ...a, pts: a.pts.concat(a.pred) } : a, false);
   }
 
-  // Draw only the newest segment of the live stroke on the tiles it touches.
-  _drawLive(first, a = this.active) {
-    const pts = a.pts;
-    const n = pts.length / 3;
-    const layer = a.tool === 'highlighter' ? 'hl' : 'ink';
-    const pad = a.size * 2;
-    let segB;
-    if (first) segB = [pts[0] - pad, pts[1] - pad, pts[0] + pad, pts[1] + pad];
-    else {
-      const i = n - 1;
-      const xs = [pts[(i - 2 < 0 ? 0 : i - 2) * 3], pts[(i - 1) * 3], pts[i * 3]];
-      const ys = [pts[(i - 2 < 0 ? 0 : i - 2) * 3 + 1], pts[(i - 1) * 3 + 1], pts[i * 3 + 1]];
-      segB = [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad];
-    }
-    for (const [i, t] of this.tiles) {
-      const y0 = i * TILE_H;
-      if (segB[3] < y0 || segB[1] > y0 + TILE_H) continue;
-      const ctx = this._ctx(t[layer], i);
-      if (first) drawDot(ctx, a, 0);
-      else drawSegment(ctx, a, n - 1);
+  _liveEnd() {
+    if (this.liveRaf) { cancelAnimationFrame(this.liveRaf); this.liveRaf = 0; }
+    for (const c of [this.live.hl, this.live.ink]) {
+      if (c.hidden) continue;
+      c.getContext('2d').clearRect(0, 0, c.width, c.height);
+      c.hidden = true;
     }
   }
 
@@ -737,11 +747,10 @@ function makeCanvas(cls) {
 const r1 = v => Math.round(v * 10) / 10;
 const r2 = v => Math.round(v * 100) / 100;
 
-// Smoothing levels (index 0 is off). FOLLOW is how closely the line follows a slow
-// Pencil; once the line trails by REACH logical px it follows fully, so fast writing
-// stays crisp and the stroke never needs tidying after the Pencil lifts.
-const FOLLOW = [1, 0.5, 0.34, 0.22];
-const REACH = [1, 9, 13, 18];
+// Smoothing levels (index 0 is off): how far each point of the drawn line moves toward
+// the Pencil sample. The tip of the line is always the Pencil itself, so there is no lag;
+// only the line behind it is eased into a smoother curve.
+const STREAM = [1, 0.62, 0.46, 0.33];
 
 // Hold to snap: how long the Pencil must rest, and how far it may drift (logical px).
 const HOLD_MS = 550;
@@ -919,41 +928,132 @@ function boxOfAll(list) {
   return list.reduce((acc, s) => union(acc, s.bbox || bboxOf(s)), [Infinity, Infinity, -Infinity, -Infinity]);
 }
 
-function widthAt(s, i) {
-  if (!s.pressure) return s.size;
-  const p = s.pts[i * 3 + 2];
-  return Math.max(0.6, s.size * (0.35 + 1.3 * p));
+// ---------- stroke rendering ----------
+//
+// A stroke's samples become a smooth centre line (eased toward the Pencil, then fitted
+// with a curve sampled about every logical pixel). Pressure strokes are filled as one
+// outline whose width follows the pressure, like a real pen; uniform strokes are stroked
+// along the same line. The result is cached per stroke.
+
+const PATHS = new WeakMap();
+
+function radiusAt(s, p) {
+  if (!s.pressure) return s.size / 2;
+  const q = Math.sqrt(Math.min(1, Math.max(0, p)));
+  return Math.max(0.3, s.size * (0.5 + 0.75 * q) / 2);
 }
 
-function drawDot(ctx, s, i) {
-  ctx.fillStyle = s.color;
-  ctx.beginPath();
-  ctx.arc(s.pts[i * 3], s.pts[i * 3 + 1], widthAt(s, i) / 2, 0, Math.PI * 2);
-  ctx.fill();
+function centreLine(s) {
+  const P = s.pts, n = P.length / 3;
+  const t = STREAM[s.sm || 0] ?? 1;
+  // 1. Ease each point toward its sample, then let the line curve in to finish exactly
+  //    at the last sample (the Pencil), the same way while writing and after lifting.
+  const q = [P[0], P[1], P[2]];
+  let x = P[0], y = P[1], p = P[2];
+  const push = force => {
+    const m = q.length;
+    if (!force && (x - q[m - 3]) ** 2 + (y - q[m - 2]) ** 2 < 0.04) return;
+    q.push(x, y, p);
+  };
+  for (let i = 1; i < n; i++) {
+    x += (P[i * 3] - x) * t;
+    y += (P[i * 3 + 1] - y) * t;
+    p += (P[i * 3 + 2] - p) * 0.5;
+    push(false);
+  }
+  if (n > 1 && t < 1) {
+    const ex = P[(n - 1) * 3], ey = P[(n - 1) * 3 + 1];
+    for (let j = 0; j < 8 && (ex - x) ** 2 + (ey - y) ** 2 > 0.09; j++) {
+      x += (ex - x) * t; y += (ey - y) * t;
+      push(false);
+    }
+    x = ex; y = ey;
+    push(true);
+  }
+  // 2. Curve through the midpoints (never overshoots), sampled finely.
+  const C = { x: [], y: [], r: [] };
+  const add = (X, Y, R) => { C.x.push(X); C.y.push(Y); C.r.push(R); };
+  const k = q.length / 3;
+  const R = i => radiusAt(s, q[i * 3 + 2]);
+  add(q[0], q[1], R(0));
+  if (k === 1) return C;
+  let sx = q[0], sy = q[1], sr = R(0);
+  for (let i = 1; i < k - 1; i++) {
+    const cx = q[i * 3], cy = q[i * 3 + 1], cr = R(i);
+    const ex = (cx + q[(i + 1) * 3]) / 2, ey = (cy + q[(i + 1) * 3 + 1]) / 2, er = (cr + R(i + 1)) / 2;
+    const len = Math.hypot(cx - sx, cy - sy) + Math.hypot(ex - cx, ey - cy);
+    const steps = Math.max(1, Math.min(24, Math.ceil(len / 1.1)));
+    for (let j = 1; j <= steps; j++) {
+      const u = j / steps, a = (1 - u) * (1 - u), b = 2 * u * (1 - u), c = u * u;
+      add(a * sx + b * cx + c * ex, a * sy + b * cy + c * ey, a * sr + b * cr + c * er);
+    }
+    sx = ex; sy = ey; sr = er;
+  }
+  const lx = q[(k - 1) * 3], ly = q[(k - 1) * 3 + 1], lr = R(k - 1);
+  const steps = Math.max(1, Math.min(24, Math.ceil(Math.hypot(lx - sx, ly - sy) / 1.1)));
+  for (let j = 1; j <= steps; j++) {
+    const u = j / steps;
+    add(sx + (lx - sx) * u, sy + (ly - sy) * u, sr + (lr - sr) * u);
+  }
+  return C;
 }
 
-// Segment i joins the midpoint before point i-1 to the midpoint after it, curving through
-// point i-1. Drawing segments 1..n-1 plus a final tail gives one smooth stroke.
-function drawSegment(ctx, s, i) {
-  const P = s.pts;
-  const x0 = P[(i - 1) * 3], y0 = P[(i - 1) * 3 + 1];
-  const x1 = P[i * 3], y1 = P[i * 3 + 1];
-  const mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
-  let sx, sy;
-  if (i === 1) { sx = x0; sy = y0; }
-  else { sx = (P[(i - 2) * 3] + x0) / 2; sy = (P[(i - 2) * 3 + 1] + y0) / 2; }
-  ctx.strokeStyle = s.color;
-  ctx.lineWidth = (widthAt(s, i - 1) + widthAt(s, i)) / 2;
-  ctx.beginPath();
-  ctx.moveTo(sx, sy);
-  ctx.quadraticCurveTo(x0, y0, mx, my);
-  ctx.stroke();
+// Filled outline for a pressure stroke. Each run is a band (one side forward, the other
+// back) wound the same way as the round caps, so overlaps merge cleanly into one shape.
+function outlinePath(C) {
+  const path = new Path2D();
+  const m = C.x.length;
+  const dot = j => { path.moveTo(C.x[j] + C.r[j], C.y[j]); path.arc(C.x[j], C.y[j], C.r[j], 0, Math.PI * 2); };
+  dot(0);
+  if (m === 1) return path;
+  const band = (a, b) => {
+    if (b <= a) return;
+    const nx = [], ny = [];
+    for (let j = a; j <= b; j++) {
+      const j0 = Math.max(a, j - 1), j1 = Math.min(b, j + 1);
+      let dx = C.x[j1] - C.x[j0], dy = C.y[j1] - C.y[j0];
+      const l = Math.hypot(dx, dy) || 1;
+      nx.push(-dy / l); ny.push(dx / l);
+    }
+    path.moveTo(C.x[a] - nx[0] * C.r[a], C.y[a] - ny[0] * C.r[a]);
+    for (let j = a + 1; j <= b; j++) path.lineTo(C.x[j] - nx[j - a] * C.r[j], C.y[j] - ny[j - a] * C.r[j]);
+    for (let j = b; j >= a; j--) path.lineTo(C.x[j] + nx[j - a] * C.r[j], C.y[j] + ny[j - a] * C.r[j]);
+    path.closePath();
+  };
+  let start = 0;
+  for (let j = 1; j < m - 1; j++) {
+    const ax = C.x[j] - C.x[j - 1], ay = C.y[j] - C.y[j - 1], bx = C.x[j + 1] - C.x[j], by = C.y[j + 1] - C.y[j];
+    const cos = (ax * bx + ay * by) / ((Math.hypot(ax, ay) * Math.hypot(bx, by)) || 1);
+    if (cos < 0.2) { band(start, j); dot(j); start = j; } // a sharp corner: start a new band
+    else if (cos < 0.97) dot(j);                        // a tight curve: fill the inside of the bend
+  }
+  band(start, m - 1);
+  dot(m - 1);
+  return path;
 }
 
-export function drawStroke(ctx, s) {
+function linePath(C) {
+  const path = new Path2D();
+  path.moveTo(C.x[0], C.y[0]);
+  if (C.x.length === 1) path.lineTo(C.x[0] + 0.01, C.y[0]);
+  for (let j = 1; j < C.x.length; j++) path.lineTo(C.x[j], C.y[j]);
+  return path;
+}
+
+function strokePath(s, cache) {
+  if (cache) {
+    const c = PATHS.get(s);
+    if (c && c.pts === s.pts && c.size === s.size && c.n === s.pts.length) return c.path;
+  }
+  const C = centreLine(s);
+  const path = s.pressure ? outlinePath(C) : linePath(C);
+  if (cache) PATHS.set(s, { pts: s.pts, size: s.size, n: s.pts.length, path });
+  return path;
+}
+
+export function drawStroke(ctx, s, cache = true) {
   const n = s.pts.length / 3;
-  if (n === 1) { drawDot(ctx, s, 0); return; }
-  if (s.poly) {
+  if (s.poly && n > 1) {
     // Shapes keep their sharp corners.
     const P = s.pts;
     ctx.strokeStyle = s.color;
@@ -964,31 +1064,15 @@ export function drawStroke(ctx, s) {
     ctx.stroke();
     return;
   }
-  if (!s.pressure) {
-    // Uniform width: one path, so overlapping parts do not double up.
-    const P = s.pts;
+  const path = strokePath(s, cache);
+  if (s.pressure) {
+    ctx.fillStyle = s.color;
+    ctx.fill(path);
+  } else {
     ctx.strokeStyle = s.color;
     ctx.lineWidth = s.size;
-    ctx.beginPath();
-    ctx.moveTo(P[0], P[1]);
-    for (let i = 1; i < n; i++) {
-      const x0 = P[(i - 1) * 3], y0 = P[(i - 1) * 3 + 1];
-      const mx = (x0 + P[i * 3]) / 2, my = (y0 + P[i * 3 + 1]) / 2;
-      if (i === 1) ctx.lineTo(mx, my);
-      else ctx.quadraticCurveTo(x0, y0, mx, my);
-    }
-    ctx.lineTo(P[(n - 1) * 3], P[(n - 1) * 3 + 1]);
-    ctx.stroke();
-    return;
+    ctx.stroke(path);
   }
-  for (let i = 1; i < n; i++) drawSegment(ctx, s, i);
-  // tail from last midpoint to the final point
-  const P = s.pts, i = n - 1;
-  ctx.lineWidth = widthAt(s, i);
-  ctx.beginPath();
-  ctx.moveTo((P[(i - 1) * 3] + P[i * 3]) / 2, (P[(i - 1) * 3 + 1] + P[i * 3 + 1]) / 2);
-  ctx.lineTo(P[i * 3], P[i * 3 + 1]);
-  ctx.stroke();
 }
 
 function bboxOf(s) {

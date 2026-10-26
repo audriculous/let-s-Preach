@@ -6,7 +6,7 @@ A sermon prep notebook for iPad and Apple Pencil. Type a passage, it pulls the t
 
 - **Fetch any passage** from Bible Gateway: NIV, ESV, NASB, NASB 1995, CSB, NKJV, KJV, NLT, NRSVue. Or paste text, or start a blank page.
 - **Apple Pencil writes, finger scrolls.** Your palm is ignored while the Pencil is down.
-- **Pen** in 8 colours and 6 thicknesses, pressure sensitive, with **handwriting smoothing** (Off / Low / Med / High in Page options). Smoothing happens live as you write and adapts to your speed, so nothing shifts when you lift the Pencil.
+- **Pen** in 8 colours and 6 thicknesses, pressure sensitive, with **handwriting smoothing** (Off / Low / Med / High in Page options). The ink always reaches the Pencil tip with no lag. Smoothing only eases the line behind the tip, and each stroke is drawn as one clean variable-width shape, so nothing shifts when you lift the Pencil.
 - **Hold still to snap:** end a stroke and hold the Pencil still, and it becomes a straight line (level if nearly level) or a neat oval. Keep holding to drag the end of a line.
 - **Highlighter** in 6 colours. It sits behind the words, so the text stays crisp.
 - **Eraser** removes whole strokes. Or just **scribble over ink** with the pen to rub it out.
