@@ -4,18 +4,26 @@ A sermon prep notebook for iPad and Apple Pencil. Type a passage, it pulls the t
 
 ## Features
 
-- **Fetch any passage** from Bible Gateway: NIV, ESV, NASB, CSB, NKJV, KJV. Or paste text, or start a blank page.
+- **Fetch any passage** from Bible Gateway: NIV, ESV, NASB, NASB 1995, CSB, NKJV, KJV, NLT, NRSVue. Or paste text, or start a blank page.
 - **Apple Pencil writes, finger scrolls.** Your palm is ignored while the Pencil is down.
-- **Pen** in 8 colours and 3 widths, pressure sensitive, with **handwriting smoothing** (Off / Low / Med / High in Page options).
+- **Pen** in 8 colours and 6 thicknesses, pressure sensitive, with **handwriting smoothing** (Off / Low / Med / High in Page options). Smoothing happens live as you write and adapts to your speed, so nothing shifts when you lift the Pencil.
 - **Hold still to snap:** end a stroke and hold the Pencil still, and it becomes a straight line (level if nearly level) or a neat oval. Keep holding to drag the end of a line.
 - **Highlighter** in 6 colours. It sits behind the words, so the text stays crisp.
 - **Eraser** removes whole strokes. Or just **scribble over ink** with the pen to rub it out.
+- **Lasso** a loop around ink to select it, then drag it, resize it from the gold corner handle, recolour it from the colour row, duplicate or delete it. Your finger can drag a selection too.
+- **Shapes:** straight line, arrow, box or oval. Pick one, then drag.
+- **Ruler:** move it with one finger, turn it with two (it settles on level, upright and 45°). Pen or highlighter strokes that start beside its edge run dead straight along it.
+- **Spot repeated words:** with the magnifier tool, tap a word to box every place it appears in the passage, each word in its own colour ("law" and "laws" count as one). The bar suggests the most repeated words, and **Connectives** underlines words like therefore, but, for, because and so that show how the argument is built.
+- **Outline** (list icon): big idea, the breakup into points, application and illustrations. **Suggest a breakup** splits the passage at its headings, paragraph breaks and words like "therefore". Each point's verses can be edited, and the breakup shows on the page as numbered markers. **Before you preach** has a short checklist and gently flags typed text that touches sensitive topics (suicide, abuse, sexuality, politics, personal stories and so on) so you can handle it with care. **Share outline** sends it as text, and it is added to the end of the PDF.
+- **Compare translations** (Outline sheet, Compare tab): see any of the other versions verse by verse beside your text, with the different words highlighted.
+- **Series, tags and date preached** for each study (Page options). On the home screen, search your studies and filter by series or tag.
 - **Text boxes** for typed notes. Drag them by the gold dot, delete with the ×. Scribble also works if you write into one with the Pencil.
 - **Undo / redo** for everything (Cmd+Z on a keyboard too).
 - **Wide margins and roomy line spacing** so you have space to think. The page grows as you write near the bottom.
 - **Export PDF** of the marked-up page (share icon in the toolbar, or Page options). It splits onto A4 pages without cutting through a line, and opens the share sheet so you can save to Files, AirDrop or print.
 - **Pin studies** to the top of your list with the pin button.
 - Saves automatically on the iPad and works offline. **Back up / Restore** on the home screen exports everything as one file.
+- **Sync and daily cloud backup** between your iPad and laptop through your own Worker (see below).
 
 ## Put it on your iPad
 
@@ -35,6 +43,20 @@ Bible Gateway does not let web apps read its pages directly, so the app goes thr
 
 The worker only fetches Bible Gateway passages, so nobody can misuse it as a general proxy.
 
+## Sync between iPad and laptop, with daily backups (10 minutes, free)
+
+This uses the same Worker plus a small free Cloudflare database (KV).
+
+1. In Cloudflare: **Storage & Databases → KV → Create**, name it `lets-preach`.
+2. Open your Worker: **Settings → Bindings → Add → KV namespace**. Variable name **`LP`** (capitals), pick the `lets-preach` namespace, save.
+3. **Edit code**, replace everything with the new [`worker/worker.js`](worker/worker.js), **Deploy**.
+4. On the iPad: **Settings → New code**, then **Save**. Copy the code.
+5. On the laptop: open the app link, **Settings**, paste the same Worker URL and the same sync code, **Save**.
+
+After that each device syncs when you open the app, when you leave a study, a minute or two after you stop writing, and every five minutes while it is open. If the same study is changed on both devices before they sync, the most recent change wins. Once a day it also saves a backup of every study to the Worker; the last 30 days are kept, and **Settings → Cloud backups** can restore any of them.
+
+Keep the sync code private: anyone with the code and your Worker URL can read your studies. Cloudflare's free plan allows 1,000 saves a day, which is plenty for normal use.
+
 ## Design
 
 It shares the look of Let's Pray and Lemme Werk-out: Barlow and Barlow Condensed (bundled in `fonts/`, so it works offline), warm off-white cards, spaced green eyebrows, and an ochre accent. The icon source is `icons/icon.html`.
@@ -42,6 +64,7 @@ It shares the look of Let's Pray and Lemme Werk-out: Barlow and Barlow Condensed
 ## Notes
 
 - Layout settings (text size, spacing, margins, verse numbers) change where the words sit. Set them before you start marking up, since existing ink will not move with the text.
-- Your studies live in Safari's storage on that iPad. Use **Back up** now and then.
+- Your studies live in Safari's storage on each device. Turn on sync for an automatic daily backup, or use **Back up** now and then.
+- The sensitive-topic check reads typed text only, not handwriting, and is a prompt to think, not a judgement.
 - The PDF is an image of each page, so its text can't be selected or searched.
 - Scripture text is fetched for personal study. NIV text is copyright Biblica, Inc.

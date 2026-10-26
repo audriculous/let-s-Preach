@@ -13,14 +13,16 @@ let nextId = 1;
 const uid = () => Date.now().toString(36) + '-' + (nextId++).toString(36);
 
 export class Ink {
-  constructor({ scroller, pageBox, hlLayer, inkLayer, onAction, onChange, onTextTap, onNearBottom }) {
+  constructor({ scroller, pageBox, hlLayer, inkLayer, overlay, onAction, onChange, onTextTap, onWordTap, onNearBottom }) {
     this.scroller = scroller;
     this.pageBox = pageBox;
     this.hlLayer = hlLayer;
     this.inkLayer = inkLayer;
+    this.overlay = overlay;
     this.onAction = onAction;
     this.onChange = onChange;
     this.onTextTap = onTextTap;
+    this.onWordTap = onWordTap;
     this.onNearBottom = onNearBottom;
 
     this.strokes = [];
@@ -33,12 +35,17 @@ export class Ink {
     this.smoothing = 2;     // 0 off, 1 low, 2 medium, 3 high
     this.snapShapes = true; // hold the Pencil still to turn a stroke into a line or oval
     this.scribbleErase = true; // scribble over ink with the pen to erase it
+    this.shapeKind = 'line';   // shape tool: line, arrow, box or oval
+    this.ruler = null;         // set by the app; strokes that start beside it run along its edge
 
     this.tiles = new Map(); // index -> { hl, ink }
     this.pool = [];
     this.active = null;     // stroke being drawn
     this.erasing = null;    // { pointerId, removed: [] }
-    this.tap = null;        // text tool tap tracking
+    this.tap = null;        // text / word tool tap tracking
+    this.lassoing = null;   // { id, pts } while drawing a lasso
+    this.selection = null;  // { strokes, box }
+    this.dragging = null;   // moving or resizing the selection
     this.penDown = false;
     this.rafPending = false;
 
@@ -49,7 +56,9 @@ export class Ink {
 
   setStrokes(strokes) {
     this.strokes = strokes.map(s => ({ ...s, bbox: s.bbox || bboxOf(s) }));
+    this.selection = null;
     this.rebuildTiles();
+    this._renderOverlay();
   }
 
   layout(scale, pageH) {
@@ -58,6 +67,8 @@ export class Ink {
     this.pageH = pageH;
     if (changedScale) this.rebuildTiles();
     else this.updateTiles();
+    this._renderOverlay();
+    if (this.ruler) this.ruler.render();
   }
 
   maxInkY() {
@@ -92,8 +103,59 @@ export class Ink {
     this.onChange();
   }
 
+  addStrokes(list, record = true) {
+    let b = null;
+    for (const s of list) { s.bbox = bboxOf(s); this.strokes.push(s); b = b ? union(b, s.bbox) : s.bbox; }
+    if (b) this.redrawRegion(b);
+    if (record) {
+      this.onAction({
+        undo: () => this.removeStrokes(list, false),
+        redo: () => this.addStrokes(list, false),
+      });
+    }
+    this.onChange();
+  }
+
   clearAll() {
+    this.clearSelection();
     if (this.strokes.length) this.removeStrokes(this.strokes.slice());
+  }
+
+  // ---------- lasso selection ----------
+
+  clearSelection() {
+    if (!this.selection && !this.lassoing) return;
+    this.selection = null;
+    this.lassoing = null;
+    this._renderOverlay();
+  }
+
+  deleteSelection() {
+    const sel = this.selection;
+    if (!sel) return;
+    this.clearSelection();
+    this.removeStrokes(sel.strokes);
+  }
+
+  duplicateSelection() {
+    const sel = this.selection;
+    if (!sel) return;
+    const copies = sel.strokes.map(s => ({ ...s, id: uid(), pts: s.pts.map((v, i) => (i % 3 === 2 ? v : r1(v + 24))) }));
+    this.addStrokes(copies);
+    this.selection = { strokes: copies, box: boxOfAll(copies) };
+    this._renderOverlay();
+  }
+
+  recolorSelection(color) {
+    const sel = this.selection;
+    if (!sel) return false;
+    const list = sel.strokes.filter(s => s.tool !== 'highlighter' && s.color !== color);
+    if (!list.length) return true;
+    const before = list.map(s => s.color);
+    const apply = cols => { list.forEach((s, i) => { s.color = cols[i]; }); this.redrawRegion(boxOfAll(list)); this.onChange(); };
+    apply(list.map(() => color));
+    this.onAction({ undo: () => apply(before), redo: () => apply(list.map(() => color)) });
+    return true;
   }
 
   // ---------- tiles ----------
@@ -188,10 +250,15 @@ export class Ink {
     // Stop the Pencil from scrolling the page while the finger still scrolls normally.
     const blockStylus = e => {
       if (this.tool === 'hand' || this.tool === 'text') return;
+      if (e.target.closest && e.target.closest('.sel-bar, .note-wrap')) return;
       for (const t of e.touches) {
         if (t.touchType === 'stylus') { e.preventDefault(); return; }
       }
-      if (this.fingerDraw && this.tool !== 'hand') e.preventDefault();
+      if (this.tool === 'spot') return; // fingers tap words and still scroll
+      // A finger that lands on a lasso selection moves it instead of scrolling.
+      if (this.selection && e.type === 'touchstart' && e.touches.length === 1 && this._selHit(this._point(e.touches[0]))) { e.preventDefault(); return; }
+      if (this.dragging) { e.preventDefault(); return; }
+      if (this.fingerDraw) e.preventDefault();
     };
     sc.addEventListener('touchstart', blockStylus, { passive: false });
     sc.addEventListener('touchmove', blockStylus, { passive: false });
@@ -227,11 +294,24 @@ export class Ink {
   _down(e) {
     if (this.tool === 'hand') return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.target.closest && e.target.closest('.note-wrap, .sel-bar')) return;
+
+    if (this.tool === 'spot') {
+      this.tap = { id: e.pointerId, x: e.clientX, y: e.clientY, pt: this._point(e), kind: 'word' };
+      return;
+    }
+
+    // Pencil or finger on a lasso selection: move it, or resize from the corner handle.
+    if (this.tool === 'lasso' && this.selection && !(e.pointerType === 'touch' && this.penDown)) {
+      const pt = this._point(e);
+      const mode = this._selHit(pt);
+      if (mode) { this._startDrag(e, pt, mode); return; }
+    }
+
     if (!this._accepts(e)) return;
-    if (e.target.closest && e.target.closest('.note-wrap')) return;
 
     if (this.tool === 'text') {
-      this.tap = { id: e.pointerId, x: e.clientX, y: e.clientY, pt: this._point(e) };
+      this.tap = { id: e.pointerId, x: e.clientX, y: e.clientY, pt: this._point(e), kind: 'text' };
       return;
     }
 
@@ -245,17 +325,38 @@ export class Ink {
       return;
     }
 
-    const [x, y, p] = this._point(e);
+    let [x, y, p] = this._point(e);
+
+    if (this.tool === 'lasso') {
+      this.clearSelection();
+      this.lassoing = { id: e.pointerId, pts: [x, y] };
+      this._renderOverlay();
+      return;
+    }
+
+    if (this.tool === 'shape') {
+      this.active = {
+        id: uid(), pointerId: e.pointerId, tool: 'pen', color: this.color, size: this.size,
+        pressure: false, kind: this.shapeKind, poly: this.shapeKind !== 'oval',
+        x0: x, y0: y, pts: [r1(x), r1(y), 0.5],
+      };
+      return;
+    }
+
     const isHl = this.tool === 'highlighter';
+    const size = isHl ? this.size * 6 : this.size;
+    const ruled = this.ruler && this.ruler.edgeNear(x, y, size);
+    if (ruled) [x, y] = project(ruled, x, y);
     this.active = {
       id: uid(),
       pointerId: e.pointerId,
       tool: this.tool,
       color: this.color,
-      size: isHl ? this.size * 6 : this.size,
+      size,
       pressure: e.pointerType === 'pen' && !isHl,
       pts: [r1(x), r1(y), r2(p)],
       lastP: p,
+      ruled,
       sx: x, sy: y,           // stabilised pen position
       raw: [x, y, p],         // last unsmoothed sample, so the stroke ends where the Pencil lifted
     };
@@ -263,6 +364,18 @@ export class Ink {
   }
 
   _move(e) {
+    if (this.dragging && e.pointerId === this.dragging.id) {
+      e.preventDefault();
+      this._dragTo(this._point(e));
+      return;
+    }
+    if (this.lassoing && e.pointerId === this.lassoing.id) {
+      e.preventDefault();
+      const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      for (const ev of (evs.length ? evs : [e])) { const [x, y] = this._point(ev); this.lassoing.pts.push(x, y); }
+      this._queueOverlay();
+      return;
+    }
     if (this.erasing && e.pointerId === this.erasing.id) {
       const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       (evs.length ? evs : [e]).forEach(ev => this._eraseAt(this._point(ev)));
@@ -271,21 +384,36 @@ export class Ink {
     const a = this.active;
     if (!a || e.pointerId !== a.pointerId) return;
     e.preventDefault();
+    if (a.kind) {
+      // Shape tool: the shape follows the Pencil from where it went down.
+      const [x, y] = this._point(e);
+      const before = bboxOf(a);
+      a.pts = dragShape(a.kind, a.x0, a.y0, x, y, a.size);
+      this._repaintActive(before);
+      return;
+    }
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-    const follow = FOLLOW[this.smoothing] ?? 1;
+    const base = FOLLOW[this.smoothing] ?? 1, reach = REACH[this.smoothing] ?? 1;
     for (const ev of (evs.length ? evs : [e])) {
       let [x, y, p] = this._point(ev);
+      if (a.ruled) [x, y] = project(a.ruled, x, y);
       a.raw = [x, y, p];
       if (a.snapped) {
         // After a line snaps, keep holding and drag to move its far end.
         if (a.snapped.type === 'line') this._dragLineEnd(x, y);
         continue;
       }
-      this._armHold(x, y);
-      // Stabiliser: the line trails the Pencil slightly, which irons out hand wobble.
-      a.sx += (x - a.sx) * follow;
-      a.sy += (y - a.sy) * follow;
-      x = a.sx; y = a.sy;
+      if (!a.ruled) {
+        this._armHold(x, y);
+        // Live stabiliser: slow, careful strokes are smoothed the most; quick ones follow
+        // the Pencil closely so the line never lags far behind. What you see while writing
+        // is exactly what stays on the page.
+        const lag = Math.hypot(x - a.sx, y - a.sy);
+        const follow = base + (1 - base) * Math.min(1, lag / reach);
+        a.sx += (x - a.sx) * follow;
+        a.sy += (y - a.sy) * follow;
+        x = a.sx; y = a.sy;
+      }
       const n = a.pts.length;
       const dx = x - a.pts[n - 3], dy = y - a.pts[n - 2];
       if (dx * dx + dy * dy < 0.6) continue; // skip jitter
@@ -301,9 +429,20 @@ export class Ink {
 
     if (this.tap && e.pointerId === this.tap.id) {
       const moved = Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y);
-      const pt = this.tap.pt;
+      const { pt, kind } = this.tap;
       this.tap = null;
-      if (!cancelled && moved < 12) this.onTextTap(pt[0], pt[1]);
+      if (!cancelled && moved < 12) (kind === 'word' ? this.onWordTap : this.onTextTap)(pt[0], pt[1]);
+      return;
+    }
+
+    if (this.dragging && e.pointerId === this.dragging.id) { this._endDrag(); return; }
+
+    if (this.lassoing && e.pointerId === this.lassoing.id) {
+      const poly = this.lassoing.pts;
+      this.lassoing = null;
+      const picked = poly.length >= 12 ? this.strokes.filter(s => insideShare(s, poly) >= 0.6) : [];
+      this.selection = picked.length ? { strokes: picked, box: boxOfAll(picked) } : null;
+      this._renderOverlay();
       return;
     }
 
@@ -324,19 +463,29 @@ export class Ink {
     if (!a || e.pointerId !== a.pointerId) return;
     this.active = null;
     clearTimeout(a.holdTimer);
-    let pts = a.pts;
-    const liveBox = union(bboxOf({ pts, size: a.size }), a.paintedBox || bboxOf({ pts, size: a.size })); // where the live preview was painted
-    if (this.smoothing && !a.snapped) {
+    const pts = a.pts;
+    if (a.kind) {
+      const b = bboxOf(a);
+      if (b[2] - b[0] < a.size * 2.4 + 6 && b[3] - b[1] < a.size * 2.4 + 6) { // a tap, not a shape
+        if (a.paintedBox) this.redrawRegion(a.paintedBox);
+        return;
+      }
+    } else if (a.raw && !a.snapped && !cancelled) {
+      // Finish at the point where the Pencil lifted, drawn live so nothing shifts afterwards.
       const n = pts.length;
       const [rx, ry, rp] = a.raw;
-      if ((rx - pts[n - 3]) ** 2 + (ry - pts[n - 2]) ** 2 > 0.6) pts.push(r1(rx), r1(ry), r2(rp));
-      pts = smoothPoints(pts, PASSES[this.smoothing]);
+      if ((rx - pts[n - 3]) ** 2 + (ry - pts[n - 2]) ** 2 > 0.6) {
+        pts.push(r1(rx), r1(ry), r2(a.lastP * 0.6 + rp * 0.4));
+        this._drawLive(false, a);
+      }
     }
+    const liveBox = union(bboxOf({ pts, size: a.size }), a.paintedBox || bboxOf({ pts, size: a.size })); // where the live preview was painted
     const stroke = { id: a.id, tool: a.tool, color: a.color, size: a.size, pressure: a.pressure, pts };
+    if (a.poly) stroke.poly = true;
     stroke.bbox = bboxOf(stroke);
 
     // Scribble to erase: a tight back-and-forth pen stroke over existing ink removes that ink.
-    if (this.scribbleErase && a.tool === 'pen' && !a.snapped && isScribble(a.pts)) {
+    if (this.scribbleErase && a.tool === 'pen' && !a.snapped && !a.kind && !a.ruled && isScribble(a.pts)) {
       const victims = this.strokes.filter(s => scribbleCovers(stroke, s));
       if (victims.length) {
         this._eraseList(victims, liveBox);
@@ -346,7 +495,7 @@ export class Ink {
 
     this.strokes.push(stroke);
     const b = stroke.bbox;
-    // Replace the live preview with the clean (smoothed) render.
+    // Repaint the area cleanly (same stroke, so nothing visibly changes).
     this.redrawRegion([Math.min(b[0], liveBox[0]), Math.min(b[1], liveBox[1]), Math.max(b[2], liveBox[2]), Math.max(b[3], liveBox[3])]);
     this.onAction({
       undo: () => this.removeStrokes([stroke], false),
@@ -365,6 +514,131 @@ export class Ink {
       redo: () => this.removeStrokes(list, false),
     });
     this.onChange();
+  }
+
+  // ---------- moving a selection ----------
+
+  _selHit([x, y]) {
+    const sel = this.selection;
+    if (!sel) return null;
+    const b = sel.box, hr = Math.max(20, 28 / this.scale);
+    if (Math.hypot(x - b[2], y - b[3]) < hr) return 'resize';
+    const pad = 8;
+    if (x > b[0] - pad && x < b[2] + pad && y > b[1] - pad && y < b[3] + pad) return 'move';
+    return null;
+  }
+
+  _startDrag(e, pt, mode) {
+    e.preventDefault();
+    try { this.scroller.setPointerCapture(e.pointerId); } catch {}
+    const sel = this.selection;
+    this.dragging = {
+      id: e.pointerId, mode, start: pt, box: sel.box.slice(), moved: false,
+      orig: sel.strokes.map(s => ({ pts: s.pts.slice(), size: s.size })),
+    };
+  }
+
+  _dragTo([x, y]) {
+    const d = this.dragging, sel = this.selection;
+    if (!sel) return;
+    let f, k = 1;
+    if (d.mode === 'move') {
+      const dx = x - d.start[0], dy = y - d.start[1];
+      f = (px, py) => [px + dx, py + dy];
+    } else {
+      const [b0, b1, b2, b3] = d.box;
+      k = Math.max(0.2, ((x - b0) + (y - b1)) / ((b2 - b0) + (b3 - b1)));
+      f = (px, py) => [b0 + (px - b0) * k, b1 + (py - b1) * k];
+    }
+    let region = sel.box;
+    sel.strokes.forEach((s, i) => {
+      const o = d.orig[i], P = new Array(o.pts.length);
+      for (let j = 0; j < o.pts.length; j += 3) {
+        const [nx, ny] = f(o.pts[j], o.pts[j + 1]);
+        P[j] = r1(nx); P[j + 1] = r1(ny); P[j + 2] = o.pts[j + 2];
+      }
+      s.pts = P;
+      s.size = Math.round(o.size * k * 100) / 100;
+      region = union(region, s.bbox);
+      s.bbox = bboxOf(s);
+      region = union(region, s.bbox);
+    });
+    sel.box = boxOfAll(sel.strokes);
+    d.moved = true;
+    this._queueRedraw(region);
+  }
+
+  _endDrag() {
+    const d = this.dragging, sel = this.selection;
+    this.dragging = null;
+    this._renderOverlay(); // bring the action bar back
+    if (!sel || !d.moved) return;
+    const list = sel.strokes.slice();
+    const before = d.orig, after = list.map(s => ({ pts: s.pts.slice(), size: s.size }));
+    const apply = states => {
+      list.forEach((s, i) => { s.pts = states[i].pts.slice(); s.size = states[i].size; s.bbox = bboxOf(s); });
+      this.selection = null;
+      this.redrawAll();
+      this._renderOverlay();
+      this.onChange();
+    };
+    this.onAction({ undo: () => apply(before), redo: () => apply(after) });
+    this.onChange();
+    if (sel.box[3] > this.pageH - 350) this.onNearBottom();
+  }
+
+  _queueRedraw(region) {
+    this.pendingRegion = this.pendingRegion ? union(this.pendingRegion, region) : region;
+    if (this.redrawPending) return;
+    this.redrawPending = true;
+    requestAnimationFrame(() => {
+      this.redrawPending = false;
+      const r = this.pendingRegion;
+      this.pendingRegion = null;
+      if (r) this.redrawRegion(r);
+      this._renderOverlay();
+    });
+  }
+
+  _queueOverlay() {
+    if (this.overlayPending) return;
+    this.overlayPending = true;
+    requestAnimationFrame(() => { this.overlayPending = false; this._renderOverlay(); });
+  }
+
+  // The lasso line, the selection box, its resize handle and its little action bar.
+  _renderOverlay() {
+    const o = this.overlay;
+    if (!o) return;
+    const k = this.scale;
+    let html = '';
+    if (this.lassoing) {
+      const P = this.lassoing.pts;
+      let d = '';
+      for (let i = 0; i < P.length; i += 2) d += (i ? 'L' : 'M') + (P[i] * k).toFixed(1) + ' ' + (P[i + 1] * k).toFixed(1);
+      html += `<svg class="lasso-svg" width="${PAGE_W * k}" height="${this.pageH * k}"><path d="${d}"/></svg>`;
+    }
+    const sel = this.selection;
+    if (sel) {
+      const [x0, y0, x1, y1] = sel.box.map(v => v * k);
+      html += `<div class="sel-rect" style="left:${x0}px;top:${y0}px;width:${x1 - x0}px;height:${y1 - y0}px"></div>`;
+      html += `<div class="sel-handle" style="left:${x1}px;top:${y1}px"></div>`;
+      if (!this.dragging) {
+        const top = y0 > 64 ? y0 - 56 : y1 + 14;
+        html += `<div class="sel-bar" style="left:${Math.max(4, x0)}px;top:${top}px">` +
+          `<button type="button" data-act="dup">Duplicate</button><button type="button" data-act="del">Delete</button></div>`;
+      }
+    }
+    o.innerHTML = html;
+    if (!this.overlayBound) {
+      this.overlayBound = true;
+      o.addEventListener('click', e => {
+        const b = e.target.closest('[data-act]');
+        if (!b) return;
+        if (b.dataset.act === 'del') this.deleteSelection();
+        else this.duplicateSelection();
+      });
+    }
   }
 
   // ---------- hold to snap ----------
@@ -413,8 +687,7 @@ export class Ink {
   }
 
   // Draw only the newest segment of the live stroke on the tiles it touches.
-  _drawLive(first) {
-    const a = this.active;
+  _drawLive(first, a = this.active) {
     const pts = a.pts;
     const n = pts.length / 3;
     const layer = a.tool === 'highlighter' ? 'hl' : 'ink';
@@ -464,10 +737,11 @@ function makeCanvas(cls) {
 const r1 = v => Math.round(v * 10) / 10;
 const r2 = v => Math.round(v * 100) / 100;
 
-// Smoothing levels: how closely the live line follows the Pencil, and how many
-// tidy-up passes run when the Pencil lifts. Index 0 is off.
-const FOLLOW = [1, 0.6, 0.42, 0.28];
-const PASSES = [0, 1, 2, 4];
+// Smoothing levels (index 0 is off). FOLLOW is how closely the line follows a slow
+// Pencil; once the line trails by REACH logical px it follows fully, so fast writing
+// stays crisp and the stroke never needs tidying after the Pencil lifts.
+const FOLLOW = [1, 0.5, 0.34, 0.22];
+const REACH = [1, 9, 13, 18];
 
 // Hold to snap: how long the Pencil must rest, and how far it may drift (logical px).
 const HOLD_MS = 550;
@@ -593,24 +867,56 @@ function shapePoints(sh, p) {
   return out;
 }
 
-// Tidy a finished stroke: each pass nudges every point toward the average of its
-// neighbours (1-2-1 weights). Endpoints stay put, and sharp corners such as the
-// tops of letters are softened only a little, so handwriting keeps its shape.
-function smoothPoints(P, passes) {
-  const n = P.length / 3;
-  if (n < 4 || !passes) return P;
-  let a = P.slice();
-  for (let k = 0; k < passes; k++) {
-    const b = a.slice();
-    for (let i = 1; i < n - 1; i++) {
-      for (let c = 0; c < 3; c++) {
-        b[i * 3 + c] = (a[(i - 1) * 3 + c] + 2 * a[i * 3 + c] + a[(i + 1) * 3 + c]) / 4;
-      }
-    }
-    a = b;
+// Points for a shape dragged from (x0, y0) to (x, y).
+function dragShape(kind, x0, y0, x, y, size) {
+  if (kind === 'box') return [x0, y0, x, y0, x, y, x0, y, x0, y0].flatMap((v, i) => (i % 2 ? [r1(v), 0.5] : [r1(v)]));
+  if (kind === 'oval') {
+    const rx = Math.abs(x - x0) / 2, ry = Math.abs(y - y0) / 2;
+    return shapePoints({ type: 'oval', cx: (x0 + x) / 2, cy: (y0 + y) / 2, rx, ry, ang: 0 }, 0.5);
   }
-  for (let i = 0; i < a.length; i++) a[i] = (i % 3 === 2) ? r2(a[i]) : r1(a[i]);
-  return a;
+  [x, y] = straighten(x0, y0, x, y);
+  const pts = [r1(x0), r1(y0), 0.5, r1(x), r1(y), 0.5];
+  if (kind === 'arrow') {
+    const len = Math.hypot(x - x0, y - y0);
+    if (len > 4) {
+      const head = Math.min(len * 0.45, Math.max(16, size * 4.5));
+      const a = Math.atan2(y - y0, x - x0), spread = 0.5;
+      const lx = x - head * Math.cos(a - spread), ly = y - head * Math.sin(a - spread);
+      const rx = x - head * Math.cos(a + spread), ry = y - head * Math.sin(a + spread);
+      pts.push(r1(lx), r1(ly), 0.5, r1(x), r1(y), 0.5, r1(rx), r1(ry), 0.5);
+    }
+  }
+  return pts;
+}
+
+// Move a point onto a ruler edge line { ox, oy, ux, uy }.
+function project(L, x, y) {
+  const t = (x - L.ox) * L.ux + (y - L.oy) * L.uy;
+  return [L.ox + t * L.ux, L.oy + t * L.uy];
+}
+
+// Share of a stroke's points that sit inside a lasso polygon [x, y, x, y, ...].
+function insideShare(s, poly) {
+  const P = s.pts, n = P.length / 3, step = Math.max(1, Math.floor(n / 30));
+  let inside = 0, total = 0;
+  for (let i = 0; i < n; i += step) {
+    total++;
+    if (pointInPoly(P[i * 3], P[i * 3 + 1], poly)) inside++;
+  }
+  return total ? inside / total : 0;
+}
+
+function pointInPoly(x, y, poly) {
+  let c = false;
+  for (let i = 0, j = poly.length - 2; i < poly.length; j = i, i += 2) {
+    const xi = poly[i], yi = poly[i + 1], xj = poly[j], yj = poly[j + 1];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+
+function boxOfAll(list) {
+  return list.reduce((acc, s) => union(acc, s.bbox || bboxOf(s)), [Infinity, Infinity, -Infinity, -Infinity]);
 }
 
 function widthAt(s, i) {
@@ -647,6 +953,17 @@ function drawSegment(ctx, s, i) {
 export function drawStroke(ctx, s) {
   const n = s.pts.length / 3;
   if (n === 1) { drawDot(ctx, s, 0); return; }
+  if (s.poly) {
+    // Shapes keep their sharp corners.
+    const P = s.pts;
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = s.size;
+    ctx.beginPath();
+    ctx.moveTo(P[0], P[1]);
+    for (let i = 1; i < n; i++) ctx.lineTo(P[i * 3], P[i * 3 + 1]);
+    ctx.stroke();
+    return;
+  }
   if (!s.pressure) {
     // Uniform width: one path, so overlapping parts do not double up.
     const P = s.pts;

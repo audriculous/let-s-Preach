@@ -13,7 +13,7 @@ const PAD_TOP = 56;                             // top margin on pages after the
 const PAD_BOTTOM = 56;
 const HL_ALPHA = 0.4;
 
-export async function exportPdf({ page, passageEl, strokes, pageH, title }) {
+export async function exportPdf({ page, passageEl, strokes, pageH, title, marks = [], study = null }) {
   if (document.fonts) await document.fonts.ready;
   const box = page.getBoundingClientRect();
   const scale = box.width / PAGE_W;
@@ -40,9 +40,15 @@ export async function exportPdf({ page, passageEl, strokes, pageH, title }) {
     top = cut;
   }
 
+  const outlinePages = study ? layoutOutline(study) : [];
+  const total = slices.length + outlinePages.length;
+  const footer = i => `Let’s Preach  ·  ${title}  ·  ${i + 1} of ${total}`;
   const jpegs = [];
   for (let i = 0; i < slices.length; i++) {
-    jpegs.push(await renderPage(slices[i], words, bars, strokes, `Let’s Preach  ·  ${title}  ·  ${i + 1} of ${slices.length}`));
+    jpegs.push(await renderPage(slices[i], words, bars, marks, strokes, footer(i)));
+  }
+  for (let i = 0; i < outlinePages.length; i++) {
+    jpegs.push(await renderTextPage(outlinePages[i], footer(slices.length + i)));
   }
   return buildPdf(jpegs, PAGE_W * RES, PAGE_H * RES);
 }
@@ -100,7 +106,7 @@ function collectBars(root, box, scale) {
 
 // ---------- painting ----------
 
-function renderPage({ top, cut, padTop }, words, bars, strokes, footer) {
+function renderPage({ top, cut, padTop }, words, bars, marks, strokes, footer) {
   const W = PAGE_W * RES, H = PAGE_H * RES;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
@@ -132,6 +138,7 @@ function renderPage({ top, cut, padTop }, words, bars, strokes, footer) {
 
   ctx.save();
   toSheet(ctx);
+  drawMarks(ctx, marks, inSlice);
   for (const b of bars) {
     if (!inSlice(b.y, b.y + b.h)) continue;
     ctx.fillStyle = b.color;
@@ -163,9 +170,131 @@ function renderPage({ top, cut, padTop }, words, bars, strokes, footer) {
   ctx.textBaseline = 'alphabetic';
   ctx.fillText(footer.toUpperCase(), 70, PAGE_H - 24);
 
+  return toJpeg(canvas);
+}
+
+function toJpeg(canvas) {
   return new Promise(resolve => canvas.toBlob(b => {
     b.arrayBuffer().then(buf => { canvas.width = canvas.height = 0; resolve(new Uint8Array(buf)); });
   }, 'image/jpeg', 0.9));
+}
+
+// Spotted-word boxes, connective underlines and the numbered breakup.
+function drawMarks(ctx, marks, inSlice) {
+  for (const m of marks) {
+    if (!inSlice(m.y, m.y + m.h)) continue;
+    ctx.save();
+    if (m.kind === 'box') {
+      roundRect(ctx, m.x, m.y, m.w, m.h, 7);
+      ctx.globalAlpha = 0.09; ctx.fillStyle = m.color; ctx.fill();
+      ctx.globalAlpha = 1; ctx.strokeStyle = m.color; ctx.lineWidth = 2.5; ctx.stroke();
+    } else if (m.kind === 'under') {
+      ctx.fillStyle = m.color; roundRect(ctx, m.x, m.y, m.w, m.h, 2); ctx.fill();
+    } else if (m.kind === 'cut') {
+      ctx.fillStyle = m.color; roundRect(ctx, m.x - 2, m.y, 4, m.h, 2); ctx.fill();
+    } else if (m.kind === 'line') {
+      ctx.strokeStyle = m.color; ctx.lineWidth = 2.5; ctx.setLineDash([7, 5]);
+      ctx.beginPath(); ctx.moveTo(m.x, m.y); ctx.lineTo(m.x + m.w, m.y); ctx.stroke();
+    } else if (m.kind === 'badge') {
+      const r = m.w / 2;
+      ctx.fillStyle = m.color;
+      ctx.beginPath(); ctx.arc(m.x + r, m.y + r, r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#1a1a1a';
+      ctx.font = `italic 900 22px 'Barlow Condensed', sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(String(m.n), m.x + r, m.y + r + 1);
+    }
+    ctx.restore();
+  }
+}
+
+// ---------- outline pages ----------
+
+const T = {
+  title: { font: `italic 900 52px 'Barlow Condensed', sans-serif`, color: '#1a1a1a', lh: 54, upper: true },
+  eyebrow: { font: `600 15px Barlow, sans-serif`, color: '#4d7a66', lh: 24, upper: true, spacing: 3.5 },
+  point: { font: `italic 800 30px 'Barlow Condensed', sans-serif`, color: '#1a1a1a', lh: 34, upper: true },
+  body: { font: `400 20px Barlow, sans-serif`, color: '#1a1a1a', lh: 30 },
+  muted: { font: `500 17px Barlow, sans-serif`, color: '#6b6a66', lh: 26 },
+};
+const TX = 90, TW = PAGE_W - 180, TOP = 90, BOTTOM = PAGE_H - 90;
+
+function layoutOutline(study) {
+  const o = study.outline;
+  if (!o) return [];
+  const hasContent = o.bigIdea || o.application || o.illustrations || (o.points || []).some(p => p.title || p.notes || p.verses);
+  if (!hasContent) return [];
+  const blocks = [];
+  const add = (style, text, gap = 0, indent = 0) => { if (text && String(text).trim()) blocks.push({ style, text: String(text), gap, indent }); };
+  add(T.eyebrow, [study.series, 'Sermon outline'].filter(Boolean).join('  ·  '));
+  add(T.title, study.title, 4);
+  add(T.muted, [study.passage.reference !== study.title ? study.passage.reference : '', study.passage.version].filter(Boolean).join(' '), 4);
+  if (o.bigIdea) { add(T.eyebrow, 'Big idea', 30); add(T.body, o.bigIdea, 4); }
+  (o.points || []).forEach((p, i) => {
+    add(T.point, `${i + 1}. ${p.title || 'Point ' + (i + 1)}`, i === 0 ? 34 : 24);
+    add(T.muted, p.verses, 2, 34);
+    add(T.body, p.notes, 6, 34);
+  });
+  if (o.application) { add(T.eyebrow, 'Application', 34); add(T.body, o.application, 4); }
+  if (o.illustrations) { add(T.eyebrow, 'Illustrations', 30); add(T.body, o.illustrations, 4); }
+
+  // Wrap into lines, then into pages.
+  const ctx = document.createElement('canvas').getContext('2d');
+  const pages = [[]];
+  let y = TOP;
+  for (const b of blocks) {
+    ctx.font = b.style.font;
+    const lines = wrap(ctx, b.style.upper ? b.text.toUpperCase() : b.text, TW - b.indent, b.style.spacing || 0);
+    y += b.gap;
+    for (const line of lines) {
+      if (y + b.style.lh > BOTTOM) { pages.push([]); y = TOP; }
+      pages[pages.length - 1].push({ ...b, line, y });
+      y += b.style.lh;
+    }
+  }
+  return pages;
+}
+
+function wrap(ctx, text, width, spacing) {
+  const out = [];
+  const measure = s => ctx.measureText(s).width + spacing * s.length;
+  for (const para of text.split('\n')) {
+    if (!para.trim()) { out.push(''); continue; }
+    let line = '';
+    for (const word of para.split(/\s+/)) {
+      const next = line ? line + ' ' + word : word;
+      if (line && measure(next) > width) { out.push(line); line = word; } else line = next;
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+function renderTextPage(lines, footer) {
+  const canvas = document.createElement('canvas');
+  canvas.width = PAGE_W * RES; canvas.height = PAGE_H * RES;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(RES, 0, 0, RES, 0, 0);
+  ctx.textBaseline = 'top';
+  for (const l of lines) {
+    ctx.font = l.style.font;
+    ctx.fillStyle = l.style.color;
+    const x = TX + l.indent;
+    if (l.style.spacing) {
+      let cx = x;
+      for (const ch of l.line) { ctx.fillText(ch, cx, l.y); cx += ctx.measureText(ch).width + l.style.spacing; }
+    } else ctx.fillText(l.line, x, l.y);
+  }
+  ctx.fillStyle = '#e0a32e';
+  roundRect(ctx, TX, 66, 46, 8, 4);
+  ctx.fill();
+  ctx.font = `600 12px Barlow, sans-serif`;
+  ctx.fillStyle = '#8a8882';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(footer.toUpperCase(), 70, PAGE_H - 24);
+  return toJpeg(canvas);
 }
 
 function roundRect(ctx, x, y, w, h, r) {

@@ -56,6 +56,9 @@
           <option value="CSB">CSB</option>
           <option value="NKJV">NKJV</option>
           <option value="KJV">KJV</option>
+          <option value="NLT">NLT</option>
+          <option value="NRSVUE">NRSVue</option>
+          <option value="NASB1995">NASB 1995</option>
         </select>
       </div>
       <button type="submit" id="fetchBtn" class="pill">
@@ -68,6 +71,12 @@
         <button type="button" id="blankBtn" class="text-link">Blank page</button>
       </div>
     </form>
+
+    <div class="lib-tools" id="libTools" hidden>
+      <input id="searchInput" class="field search" type="search" placeholder="Search titles, series, tags and typed notes" aria-label="Search studies" autocomplete="off">
+      <div id="filterChips" class="filter-chips" role="group" aria-label="Filter by series or tag"></div>
+    </div>
+    <p id="noMatches" class="hint no-matches" hidden>No studies match.</p>
 
     <div id="pinnedBlock" hidden>
       <p class="eyebrow list-eyebrow">Pinned</p>
@@ -100,11 +109,26 @@
         <button class="tb-btn tool" data-tool="eraser" title="Eraser" aria-label="Eraser">
           <svg viewBox="0 0 24 24"><path d="M8 20h12"/><path d="M5.5 15.5l9-9a2 2 0 012.8 0l2.2 2.2a2 2 0 010 2.8L12 19H8.5z"/><path d="M9.5 11.5l5 5"/></svg>
         </button>
+        <button class="tb-btn tool" data-tool="lasso" title="Lasso: select, move, resize" aria-label="Lasso">
+          <svg viewBox="0 0 24 24"><path d="M12 4.5c4.4 0 8 2.3 8 5.2s-3.6 5.2-8 5.2-8-2.3-8-5.2 3.6-5.2 8-5.2z" stroke-dasharray="2.6 2.4"/><path d="M7.5 13.6c-1.3 1.4-.9 3.4 1.1 3.9.9.2 1.4.9 1.4 1.8V21"/></svg>
+        </button>
+        <button class="tb-btn tool" data-tool="shape" title="Shapes: line, arrow, box, oval" aria-label="Shapes">
+          <svg viewBox="0 0 24 24"><path d="M3.5 20.5l8-8"/><path d="M6.5 12.5h5v5"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.2"/></svg>
+        </button>
+        <button class="tb-btn tool" data-tool="spot" title="Spot repeated words" aria-label="Spot repeated words">
+          <svg viewBox="0 0 24 24"><path d="M10.5 17.5a7 7 0 100-14 7 7 0 000 14z"/><path d="M15.6 15.6L21 21"/><path d="M7.5 11.5l2-5 2 5M8.2 10h2.6" stroke-width="1.5"/></svg>
+        </button>
         <button class="tb-btn tool" data-tool="text" title="Text box" aria-label="Text box">
           <svg viewBox="0 0 24 24"><path d="M5 6V4h14v2"/><path d="M12 4v16"/><path d="M9 20h6"/></svg>
         </button>
         <button class="tb-btn tool" data-tool="hand" title="Scroll (finger mode)" aria-label="Scroll">
           <svg viewBox="0 0 24 24"><path d="M8 13V6.5a1.5 1.5 0 013 0V12"/><path d="M11 11.5V5a1.5 1.5 0 013 0v6.5"/><path d="M14 11.5V7a1.5 1.5 0 013 0v7a6 6 0 01-6 6h-.5a6 6 0 01-4.6-2.2L3.5 15a1.6 1.6 0 012.4-2L8 15"/></svg>
+        </button>
+      </div>
+
+      <div class="tb-group">
+        <button class="tb-btn toggle" id="rulerBtn" title="Ruler" aria-label="Ruler" aria-pressed="false">
+          <svg viewBox="0 0 24 24"><path d="M2.8 16.2L16.2 2.8l5 5L7.8 21.2z"/><path d="M6.5 12.5l2 2M9.5 9.5l1.6 1.6M12.5 6.5l2 2"/></svg>
         </button>
       </div>
 
@@ -119,6 +143,9 @@
         <button class="tb-btn" id="redoBtn" title="Redo" aria-label="Redo">
           <svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 000 11H13"/></svg>
         </button>
+        <button class="tb-btn" id="outlineBtn" title="Outline and compare" aria-label="Outline and compare">
+          <svg viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h7"/><path d="M4.2 6.5h.6M4.2 12h.6M4.2 17.5h.6" stroke-width="2.6"/></svg>
+        </button>
         <button class="tb-btn" id="pdfBtn" title="Export PDF" aria-label="Export PDF">
           <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M6 11H5a1 1 0 00-1 1v8a1 1 0 001 1h14a1 1 0 001-1v-8a1 1 0 00-1-1h-1"/></svg>
         </button>
@@ -128,17 +155,42 @@
       </div>
     </div>
 
-    <div class="stage" id="stage">
-      <div id="scroller" class="scroller">
-        <div id="pageBox" class="page-box">
-          <div id="hlLayer" class="tile-layer hl"></div>
-          <div id="page" class="page">
-            <div id="passage" class="passage"></div>
-            <div id="notes" class="notes-layer"></div>
+    <div id="spotBar" class="spot-bar" hidden>
+      <span class="spot-hint">Tap a word to box every repeat</span>
+      <div id="spotChips" class="spot-chips"></div>
+      <button type="button" id="connBtn" class="spot-chip conn" aria-pressed="false">Connectives</button>
+      <span class="spot-label" id="repeatLabel">Repeats</span>
+      <div id="spotSuggest" class="spot-chips"></div>
+      <button type="button" id="spotClear" class="text-link">Clear</button>
+    </div>
+
+    <div class="workspace">
+      <div class="stage" id="stage">
+        <div id="scroller" class="scroller">
+          <div id="pageBox" class="page-box">
+            <div id="hlLayer" class="tile-layer hl"></div>
+            <div id="page" class="page">
+              <div id="marks" class="marks-layer"></div>
+              <div id="passage" class="passage"></div>
+              <div id="notes" class="notes-layer"></div>
+            </div>
+            <div id="inkLayer" class="tile-layer ink"></div>
+            <div id="overlay" class="overlay-layer"></div>
           </div>
-          <div id="inkLayer" class="tile-layer ink"></div>
         </div>
       </div>
+
+      <aside id="sheet" class="sheet" hidden>
+        <div class="sheet-head">
+          <div class="seg" id="sheetTabs">
+            <button type="button" data-tab="outline">Outline</button>
+            <button type="button" data-tab="compare">Compare</button>
+          </div>
+          <button type="button" class="icon-chip small" id="sheetClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+        </div>
+        <div id="outlinePane" class="sheet-body"></div>
+        <div id="comparePane" class="sheet-body" hidden></div>
+      </aside>
     </div>
 
     <!-- Page options panel -->
@@ -152,6 +204,17 @@
         <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M6 11H5a1 1 0 00-1 1v8a1 1 0 001 1h14a1 1 0 001-1v-8a1 1 0 00-1-1h-1"/></svg>
         <span>Export PDF</span>
       </button>
+
+      <p class="eyebrow">Study details</p>
+      <div class="detail-grid">
+        <label for="seriesInput">Series</label>
+        <input id="seriesInput" class="field small" list="seriesList" placeholder="e.g. Romans: No Shame" autocomplete="off">
+        <label for="tagsInput">Tags</label>
+        <input id="tagsInput" class="field small" placeholder="e.g. youth, gospel, evening" autocomplete="off">
+        <label for="preachedInput">Preached</label>
+        <input id="preachedInput" class="field small" type="date">
+      </div>
+      <datalist id="seriesList"></datalist>
 
       <p class="eyebrow">View</p>
       <div class="opt-row">
@@ -249,6 +312,21 @@
       <h3 class="card-title">Passage fetcher</h3>
       <input id="proxyInput" class="field" type="url" placeholder="https://lets-preach.yourname.workers.dev" aria-label="Passage fetcher URL">
       <p class="hint">Bible Gateway does not let web apps read its pages directly, so the app goes through a small relay. It tries free public relays first. For reliable fetching, set up your own free Cloudflare Worker (see the README) and paste its URL here.</p>
+
+      <h3 class="card-title">Sync and backup</h3>
+      <p class="hint">Uses the same Worker to keep your iPad and laptop in step, and saves a backup of every study once a day (the last 30 days are kept). Put the same sync code on each device. Keep it private: anyone with it can see your studies.</p>
+      <div class="code-row">
+        <input id="syncCodeInput" class="field" type="text" placeholder="Sync code" aria-label="Sync code" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button type="button" class="chip-btn" id="newCodeBtn">New code</button>
+        <button type="button" class="chip-btn" id="copyCodeBtn">Copy</button>
+      </div>
+      <label class="opt-row"><span>Sync this device</span><input type="checkbox" class="switch" id="syncOn"></label>
+      <p class="hint" id="syncStatus"></p>
+      <div class="opt-row">
+        <button type="button" class="chip-btn" id="syncNowBtn">Sync now</button>
+        <button type="button" class="chip-btn" id="cloudBackupsBtn">Cloud backups</button>
+      </div>
+      <ul id="backupList" class="backup-list" hidden></ul>
       <div class="dialog-actions">
         <button value="cancel" class="chip-btn">Cancel</button>
         <button value="ok" class="pill"><span>Save</span></button>
