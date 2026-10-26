@@ -69,6 +69,11 @@
       </div>
     </form>
 
+    <div id="pinnedBlock" hidden>
+      <p class="eyebrow list-eyebrow">Pinned</p>
+      <ul id="pinnedList" class="study-list"></ul>
+    </div>
+
     <div id="studiesBlock">
       <p class="eyebrow list-eyebrow">Your studies</p>
       <ul id="studyList" class="study-list"></ul>
@@ -175,6 +180,11 @@
         <input type="checkbox" id="snapShapes" class="switch">
       </label>
       <p class="hint">Finish a stroke and hold the Pencil still: it becomes a straight line or a neat oval. Keep holding to drag the end of a line.</p>
+      <label class="opt-row">
+        <span>Scribble to erase</span>
+        <input type="checkbox" id="scribbleErase" class="switch">
+      </label>
+      <p class="hint">Scribble back and forth over ink with the pen to rub it out. Undo brings it back.</p>
       <label class="opt-row">
         <span>Draw with finger too</span>
         <input type="checkbox" id="fingerDraw" class="switch">

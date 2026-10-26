@@ -26,7 +26,7 @@ const MARGINS = {
 
 const loadJSON = (k, d) => { try { return { ...d, ...JSON.parse(localStorage.getItem(k) || '{}') }; } catch { return { ...d }; } };
 const prefs = loadJSON('letspreach.prefs', {
-  tool: 'pen', zoom: 1, fingerDraw: false, smoothing: 2, snapShapes: true,
+  tool: 'pen', zoom: 1, fingerDraw: false, smoothing: 2, snapShapes: true, scribbleErase: true,
   color: { pen: PALETTES.pen[0], highlighter: PALETTES.highlighter[0], text: PALETTES.text[1] },
   size: { pen: 1, highlighter: 1, text: 1 },
 });
@@ -105,21 +105,29 @@ async function showLibrary() {
   $('library').hidden = false;
   $('menuPanel').hidden = true;
   const list = (await db.allStudies()).sort((a, b) => b.updated - a.updated);
-  const ul = $('studyList');
-  ul.innerHTML = '';
-  $('studiesBlock').hidden = list.length === 0;
+  const pinned = list.filter(s => s.pinned), rest = list.filter(s => !s.pinned);
+  $('pinnedList').innerHTML = '';
+  $('studyList').innerHTML = '';
+  $('pinnedBlock').hidden = pinned.length === 0;
+  $('studiesBlock').hidden = rest.length === 0;
   setGreeting();
   for (const s of list) {
+    const ul = s.pinned ? $('pinnedList') : $('studyList');
     const li = document.createElement('li');
     li.className = 'study-item';
     const when = new Date(s.updated).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
     const sub = [s.passage.reference !== s.title ? s.passage.reference : '', s.passage.version, when].filter(Boolean).join(' · ');
-    li.innerHTML = `<div class="meta"><div class="title"></div><div class="sub"></div></div><button class="del" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3"/></svg></button>`;
+    li.innerHTML = `<div class="meta"><div class="title"></div><div class="sub"></div></div><button class="pin${s.pinned ? ' on' : ''}" aria-label="${s.pinned ? 'Unpin' : 'Pin to top'}" title="${s.pinned ? 'Unpin' : 'Pin to top'}"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 15v5"/></svg></button><button class="del" aria-label="Delete"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3"/></svg></button>`;
     li.querySelector('.title').textContent = s.title;
     li.querySelector('.sub').textContent = sub;
     li.addEventListener('click', e => {
-      if (e.target.closest('.del')) return;
+      if (e.target.closest('.del, .pin')) return;
       openStudy(s.id);
+    });
+    li.querySelector('.pin').addEventListener('click', async () => {
+      s.pinned = !s.pinned; // pinning leaves the "last edited" date alone
+      await db.putStudy(s);
+      showLibrary();
     });
     li.querySelector('.del').addEventListener('click', async () => {
       if (!confirm(`Delete "${s.title}"? This cannot be undone.`)) return;
@@ -518,6 +526,7 @@ function syncPanel() {
   const L = study.layout;
   $('fingerDraw').checked = prefs.fingerDraw;
   $('snapShapes').checked = prefs.snapShapes;
+  $('scribbleErase').checked = prefs.scribbleErase;
   document.querySelectorAll('#smoothSeg button').forEach(b => b.classList.toggle('active', +b.dataset.smooth === prefs.smoothing));
   $('optVerses').checked = L.verses;
   $('optHeadings').checked = L.headings;
@@ -575,6 +584,11 @@ document.querySelectorAll('[data-smooth]').forEach(b => b.addEventListener('clic
 }));
 ink.smoothing = prefs.smoothing;
 ink.snapShapes = prefs.snapShapes;
+ink.scribbleErase = prefs.scribbleErase;
+$('scribbleErase').addEventListener('change', e => {
+  prefs.scribbleErase = ink.scribbleErase = e.target.checked;
+  savePrefs();
+});
 $('snapShapes').addEventListener('change', e => {
   prefs.snapShapes = ink.snapShapes = e.target.checked;
   savePrefs();

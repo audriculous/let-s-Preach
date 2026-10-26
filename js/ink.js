@@ -32,6 +32,7 @@ export class Ink {
     this.fingerDraw = false;
     this.smoothing = 2;     // 0 off, 1 low, 2 medium, 3 high
     this.snapShapes = true; // hold the Pencil still to turn a stroke into a line or oval
+    this.scribbleErase = true; // scribble over ink with the pen to erase it
 
     this.tiles = new Map(); // index -> { hl, ink }
     this.pool = [];
@@ -333,6 +334,16 @@ export class Ink {
     }
     const stroke = { id: a.id, tool: a.tool, color: a.color, size: a.size, pressure: a.pressure, pts };
     stroke.bbox = bboxOf(stroke);
+
+    // Scribble to erase: a tight back-and-forth pen stroke over existing ink removes that ink.
+    if (this.scribbleErase && a.tool === 'pen' && !a.snapped && isScribble(a.pts)) {
+      const victims = this.strokes.filter(s => scribbleCovers(stroke, s));
+      if (victims.length) {
+        this._eraseList(victims, liveBox);
+        return;
+      }
+    }
+
     this.strokes.push(stroke);
     const b = stroke.bbox;
     // Replace the live preview with the clean (smoothed) render.
@@ -343,6 +354,17 @@ export class Ink {
     });
     this.onChange();
     if (stroke.bbox[3] > this.pageH - 350) this.onNearBottom();
+  }
+
+  _eraseList(list, alsoClear) {
+    const ids = new Set(list.map(s => s.id));
+    this.strokes = this.strokes.filter(s => !ids.has(s.id));
+    this.redrawRegion(list.reduce((acc, s) => union(acc, s.bbox), alsoClear));
+    this.onAction({
+      undo: () => { list.forEach(s => this.strokes.push(s)); this.redrawAll(); this.onChange(); },
+      redo: () => this.removeStrokes(list, false),
+    });
+    this.onChange();
   }
 
   // ---------- hold to snap ----------
@@ -522,6 +544,42 @@ function recognise(P, raw) {
   }
   if (err / n > 0.22) return null;
   return { type: 'oval', cx, cy, rx, ry, ang };
+}
+
+// A scribble is a compact stroke that keeps doubling back on itself.
+function isScribble(P) {
+  const n = P.length / 3;
+  if (n < 8) return null;
+  // Resample every ~5px so slow and fast strokes count the same.
+  const pts = [[P[0], P[1]]];
+  let len = 0, minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = P[i * 3], y = P[i * 3 + 1];
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    const [lx, ly] = pts[pts.length - 1];
+    const d = Math.hypot(x - lx, y - ly);
+    if (d >= 5) { pts.push([x, y]); len += d; }
+  }
+  const big = Math.max(maxX - minX, maxY - minY);
+  if (len < 70 || big < 12 || len < 3 * big) return false;
+  let reversals = 0;
+  for (let i = 2; i < pts.length - 2; i++) {
+    const ax = pts[i][0] - pts[i - 2][0], ay = pts[i][1] - pts[i - 2][1];
+    const bx = pts[i + 2][0] - pts[i][0], by = pts[i + 2][1] - pts[i][1];
+    const cos = (ax * bx + ay * by) / ((Math.hypot(ax, ay) * Math.hypot(bx, by)) || 1);
+    if (cos < -0.5) { reversals++; i += 2; } // one sharp turn counts once
+  }
+  return reversals >= 4;
+}
+
+// Does the scribble touch stroke s (or sit right over a small mark)?
+function scribbleCovers(scr, s) {
+  const a = scr.bbox, b = s.bbox;
+  if (b[2] < a[0] || b[0] > a[2] || b[3] < a[1] || b[1] > a[3]) return false;
+  if (b[0] >= a[0] && b[2] <= a[2] && b[1] >= a[1] && b[3] <= a[3]) return true; // fully inside
+  const P = scr.pts, r = scr.size / 2 + s.size / 2 + 3;
+  for (let i = 0; i < P.length; i += 3) if (hitStroke(s, P[i], P[i + 1], r)) return true;
+  return false;
 }
 
 function shapePoints(sh, p) {

@@ -9,11 +9,12 @@ A sermon prep notebook for iPad and Apple Pencil. Type a passage, it pulls the t
 - **Pen** in 8 colours and 3 widths, pressure sensitive, with **handwriting smoothing** (Off / Low / Med / High in Page options).
 - **Hold still to snap:** end a stroke and hold the Pencil still, and it becomes a straight line (level if nearly level) or a neat oval. Keep holding to drag the end of a line.
 - **Highlighter** in 6 colours. It sits behind the words, so the text stays crisp.
-- **Eraser** removes whole strokes.
+- **Eraser** removes whole strokes. Or just **scribble over ink** with the pen to rub it out.
 - **Text boxes** for typed notes. Drag them by the gold dot, delete with the ×. Scribble also works if you write into one with the Pencil.
 - **Undo / redo** for everything (Cmd+Z on a keyboard too).
 - **Wide margins and roomy line spacing** so you have space to think. The page grows as you write near the bottom.
 - **Export PDF** of the marked-up page (share icon in the toolbar, or Page options). It splits onto A4 pages without cutting through a line, and opens the share sheet so you can save to Files, AirDrop or print.
+- **Pin studies** to the top of your list with the pin button.
 - Saves automatically on the iPad and works offline. **Back up / Restore** on the home screen exports everything as one file.
 
 ## Put it on your iPad

@@ -149,6 +149,13 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .study-item .del svg { width: 20px; height: 20px; }
+.study-item .pin {
+  width: 44px; height: 44px; border-radius: 50%; border: 0; background: transparent; color: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.study-item .pin svg { width: 21px; height: 21px; }
+.study-item .pin.on { background: var(--accent); color: var(--accent-ink); }
+.study-item .pin.on svg path:first-child { fill: currentColor; }
 
 /* ---------- Study view ---------- */
 #study { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); }
