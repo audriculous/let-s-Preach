@@ -86,26 +86,24 @@ export function parsePassage(html, search, version) {
 
   const parts = [];
   const footnotes = [];
+  const extras = { footnotes: [], crossrefs: [] };
 
   blocks.forEach((block, idx) => {
     const col = block.closest('.passage-col, .passage-table, .passage-wrap') || doc;
     const refEl = col.querySelector('.dropdown-display-text, .passage-display-bcv, .bcv');
     const ref = refEl ? refEl.textContent.trim() : (idx === 0 ? search : '');
 
-    // Collect footnote texts before stripping.
-    block.querySelectorAll('.footnotes li').forEach(li => {
-      const t = li.querySelector('.footnote-text');
-      const label = li.querySelector('a.bibleref, a');
-      const text = (label ? label.textContent.trim() + ' ' : '') + (t ? t.textContent.trim() : li.textContent.trim());
-      footnotes.push(text.replace(/\s+/g, ' '));
-    });
-
     const root = block.querySelector('.text-html, .result-text-style-normal, .version-' + version) || block;
-    root.querySelectorAll('sup.footnote').forEach(sup => {
-      const letter = sup.textContent.replace(/[\[\]\s]/g, '');
+    collectExtras(block.querySelector('.footnotes, .crossrefs') ? block : col, root, extras, footnotes);
+
+    // Footnote and cross-reference markers become small tappable letters.
+    root.querySelectorAll('sup.footnote, sup.crossreference').forEach(sup => {
+      const fn = sup.classList.contains('footnote');
       const s = doc.createElement('sup');
-      s.className = 'fn';
-      s.textContent = letter;
+      s.className = fn ? 'fn' : 'xr';
+      s.textContent = sup.textContent.replace(/[\[\]()\s]/g, '');
+      const id = (sup.getAttribute(fn ? 'data-fn' : 'data-cr') || '').replace(/^#/, '');
+      if (id) s.dataset.id = id;
       sup.replaceWith(s);
     });
     DROP_SELECTORS.forEach(sel => root.querySelectorAll(sel).forEach(el => el.remove()));
@@ -123,7 +121,37 @@ export function parsePassage(html, search, version) {
   }
 
   const reference = parts.map(p => p.ref).filter(Boolean).join('; ') || search;
-  return { reference, version, parts, footnotes, copyright, source: 'biblegateway' };
+  return { reference, version, parts, footnotes, extras, copyright, source: 'biblegateway' };
+}
+
+// Footnotes and cross references, kept with the verse each one belongs to.
+//   extras.footnotes: [{ id, letter, verse, text }]
+//   extras.crossrefs: [{ id, letter, verse, refs: ['Romans 5:8', ...] }]
+function collectExtras(scope, root, extras, footnotes) {
+  const letters = new Map();
+  root.querySelectorAll('sup.footnote, sup.crossreference').forEach(sup => {
+    const id = (sup.getAttribute('data-fn') || sup.getAttribute('data-cr') || '').replace(/^#/, '');
+    if (id) letters.set(id, sup.textContent.replace(/[\[\]()\s]/g, ''));
+  });
+  const verseOf = li => {
+    const a = li.querySelector('a');
+    return a ? (a.textContent || a.getAttribute('title') || '').replace(/^Go to\s+/i, '').trim() : '';
+  };
+  scope.querySelectorAll('.footnotes li').forEach(li => {
+    const t = li.querySelector('.footnote-text');
+    const verse = verseOf(li);
+    const text = (t ? t.textContent : li.textContent.replace(verse, '')).replace(/\s+/g, ' ').trim();
+    if (extras.footnotes.some(f => f.id && f.id === li.id)) return;
+    extras.footnotes.push({ id: li.id || '', letter: letters.get(li.id) || '', verse, text });
+    footnotes.push((verse ? verse + ' ' : '') + text);
+  });
+  scope.querySelectorAll('.crossrefs li').forEach(li => {
+    if (extras.crossrefs.some(c => c.id && c.id === li.id)) return;
+    const refs = [...li.querySelectorAll('a.crossref-link, a[data-bibleref]')]
+      .flatMap(a => (a.getAttribute('data-bibleref') || a.textContent).split(/;\s*/))
+      .map(r => r.trim()).filter(Boolean);
+    if (refs.length) extras.crossrefs.push({ id: li.id || '', letter: letters.get(li.id) || '', verse: verseOf(li), refs });
+  });
 }
 
 function sanitize(root) {
@@ -137,11 +165,12 @@ function sanitize(root) {
       if (node.nodeType !== 1) return;
       const tag = TAG_MAP[node.tagName];
       if (!tag) { walk(node, dest); return; } // unwrap unknown wrappers (e.g. <a>)
-      const classes = [...node.classList].filter(c => KEEP_CLASSES.has(c) || c === 'fn');
+      const classes = [...node.classList].filter(c => KEEP_CLASSES.has(c) || c === 'fn' || c === 'xr');
       if (node.tagName === 'SPAN' && !classes.length) { walk(node, dest); return; } // drop verse wrappers
       if (node.tagName === 'SUP' && !classes.length) return; // stray sup
       const el = document.createElement(tag);
       if (classes.length) el.className = classes.join(' ');
+      if (node.tagName === 'SUP' && node.dataset.id && /^[\w-]+$/.test(node.dataset.id)) el.dataset.id = node.dataset.id;
       dest.appendChild(el);
       walk(node, el);
     });

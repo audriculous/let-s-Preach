@@ -16,7 +16,7 @@ export function emptyOutline() {
 const $ = id => document.getElementById(id);
 const pid = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
-export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toast, pushAction, setSplitMode, isSplitMode, pen, fingerDraw }) {
+export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toast, pushAction, setSplitMode, isSplitMode, pen, fingerDraw, renderRefs }) {
   const sheet = $('sheet');
   let tab = 'outline';
   let verses = [];
@@ -43,8 +43,9 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     document.querySelectorAll('#sheetTabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     $('outlinePane').hidden = tab !== 'outline';
     $('comparePane').hidden = tab !== 'compare';
+    $('refsPane').hidden = tab !== 'refs';
     verses = walkVerses(passageContainer(study().passage), study().passage.reference);
-    if (tab === 'outline') renderOutline(); else renderCompare();
+    if (tab === 'outline') renderOutline(); else if (tab === 'compare') renderCompare(); else renderRefs();
   }
 
   $('sheetClose').addEventListener('click', close);

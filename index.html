@@ -185,11 +185,13 @@
           <div class="seg" id="sheetTabs">
             <button type="button" data-tab="outline">Outline</button>
             <button type="button" data-tab="compare">Compare</button>
+            <button type="button" data-tab="refs">References</button>
           </div>
           <button type="button" class="icon-chip small" id="sheetClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         </div>
         <div id="outlinePane" class="sheet-body"></div>
         <div id="comparePane" class="sheet-body" hidden></div>
+        <div id="refsPane" class="sheet-body" hidden></div>
       </aside>
     </div>
 
@@ -281,7 +283,8 @@
       </div>
       <label class="opt-row"><span>Verse numbers</span><input type="checkbox" id="optVerses" class="switch"></label>
       <label class="opt-row"><span>Section headings</span><input type="checkbox" id="optHeadings" class="switch"></label>
-      <label class="opt-row"><span>Footnotes</span><input type="checkbox" id="optFootnotes" class="switch"></label>
+      <label class="opt-row"><span>Footnote and cross-reference letters</span><input type="checkbox" id="optMarkers" class="switch"></label>
+      <label class="opt-row"><span>Footnotes listed at the end</span><input type="checkbox" id="optFootnotes" class="switch"></label>
 
       <p class="eyebrow">Page</p>
       <div class="opt-row">

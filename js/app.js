@@ -6,6 +6,8 @@ import { Ruler } from './ruler.js';
 import { Marks, SPOT_COLORS } from './marks.js';
 import { initSheet, emptyOutline } from './sheet.js';
 import { initSync, makeSyncCode, timeAgo } from './sync.js';
+import { initRefs } from './refs.js';
+import { walkVerses } from './verses.js';
 
 const $ = id => document.getElementById(id);
 
@@ -27,7 +29,7 @@ const SHAPES = {
   box: '<rect x="4.5" y="6" width="15" height="12" rx="1.2"/>',
   oval: '<ellipse cx="12" cy="12" rx="8" ry="6"/>',
 };
-const DEFAULT_LAYOUT = { font: 26, spacing: 2.3, margin: 'right', verses: true, headings: true, footnotes: false };
+const DEFAULT_LAYOUT = { font: 26, spacing: 2.3, margin: 'right', verses: true, headings: true, markers: true, footnotes: false };
 const MARGINS = {
   right: { left: 70, width: 560 },
   both: { left: 210, width: 580 },
@@ -75,7 +77,16 @@ window.__ink = ink; // handy for debugging from the console
 const ruler = new Ruler(ink, pageBox);
 ink.ruler = ruler;
 const marks = new Marks({ page, passageEl, layer: $('marks') });
+const refs = initRefs({
+  getStudy: () => study,
+  save: () => scheduleSave(),
+  fetchPassage,
+  getWorker: () => settings.workerUrl,
+  toast,
+  openPassage: p => createAndOpen(p),
+});
 const sheet = initSheet({
+  renderRefs: () => refs.renderTab(),
   getStudy: () => study,
   save: () => scheduleSave(),
   marks,
@@ -440,6 +451,8 @@ async function openStudy(id) {
   const s = await db.getStudy(id);
   if (!s) return;
   study = s;
+  // Studies from before the letters option: keep their text exactly where it was.
+  if (study.layout && study.layout.markers === undefined) study.layout.markers = !!study.layout.footnotes;
   study.layout = { ...DEFAULT_LAYOUT, ...study.layout };
   study.notes = study.notes || [];
   study.spots = study.spots || [];
@@ -472,7 +485,7 @@ function renderPassage() {
       html += part.html;
     });
     if (p.footnotes && p.footnotes.length) {
-      html += `<div class="footnotes"><strong>Footnotes</strong><ol>${p.footnotes.map(f => `<li>${esc(f)}</li>`).join('')}</ol></div>`;
+      html += `<div class="footnotes"><strong>Footnotes</strong><ol>${p.footnotes.map(f => `<li>${esc(typeof f === 'string' ? f : f.text)}</li>`).join('')}</ol></div>`;
     }
     if (p.copyright) html += `<div class="copyright">${esc(p.copyright)}</div>`;
   }
@@ -485,6 +498,7 @@ function renderPassage() {
   passageEl.classList.toggle('no-verses', !L.verses);
   passageEl.classList.toggle('no-headings', !L.headings);
   passageEl.classList.toggle('no-footnotes', !L.footnotes);
+  passageEl.classList.toggle('no-markers', !L.markers);
   marks.invalidate();
 }
 
@@ -854,6 +868,7 @@ function syncPanel() {
   $('optVerses').checked = L.verses;
   $('optHeadings').checked = L.headings;
   $('optFootnotes').checked = L.footnotes;
+  $('optMarkers').checked = L.markers;
   document.querySelectorAll('#spacingSeg button').forEach(b => b.classList.toggle('active', +b.dataset.spacing === L.spacing));
   document.querySelectorAll('#marginSeg button').forEach(b => b.classList.toggle('active', b.dataset.margin === L.margin));
   $('layoutWarn').hidden = !(ink.strokes.length || study.notes.length);
@@ -884,6 +899,16 @@ document.querySelectorAll('[data-margin]').forEach(b => b.addEventListener('clic
 $('optVerses').addEventListener('change', e => changeLayout({ verses: e.target.checked }));
 $('optHeadings').addEventListener('change', e => changeLayout({ headings: e.target.checked }));
 $('optFootnotes').addEventListener('change', e => changeLayout({ footnotes: e.target.checked }));
+$('optMarkers').addEventListener('change', e => changeLayout({ markers: e.target.checked }));
+
+// A finger tap on a footnote or cross-reference letter, or on a verse number, shows its card.
+passageEl.addEventListener('click', e => {
+  const el = e.target.closest('sup.fn, sup.xr, sup.versenum, .chapternum');
+  if (!el || !study || ink.tool === 'split') return;
+  if (e.pointerType === 'mouse' && !['hand', 'text', 'spot'].includes(ink.tool)) return; // a mouse click there was drawing
+  const v = el.matches('sup.versenum, .chapternum') ? walkVerses(passageEl, study.passage.reference).find(x => x.el === el) : null;
+  refs.tapped(el, v && v.key);
+});
 
 document.querySelectorAll('[data-zoom]').forEach(b => b.addEventListener('click', () => {
   const d = +b.dataset.zoom;
