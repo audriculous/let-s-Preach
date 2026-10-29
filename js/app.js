@@ -464,6 +464,7 @@ async function openStudy(id) {
   $('library').hidden = true;
   $('study').hidden = false;
   $('studyTitle').value = study.title;
+  $('studyTitle').readOnly = true;
   renderPassage();
   renderNotes();
   ink.setStrokes(study.strokes || []);
@@ -527,6 +528,47 @@ document.fonts && document.fonts.ready.then(() => { relayout(); if (study) { mar
 $('backBtn').addEventListener('click', showLibrary);
 $('studyTitle').addEventListener('input', () => { study.title = $('studyTitle').value.trim() || 'Untitled'; scheduleSave(); });
 $('studyTitle').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); });
+
+// The title only becomes editable when tapped. While it is read-only, iPadOS Scribble
+// cannot write into it, so a Pencil tap on a nearby colour or tool never lands as a
+// dot or dash in the title.
+(() => {
+  const t = $('studyTitle');
+  const edit = () => {
+    if (!t.readOnly) return;
+    t.readOnly = false;
+    t.focus();
+    const n = t.value.length;
+    try { t.setSelectionRange(n, n); } catch {}
+  };
+  t.addEventListener('click', edit);
+  t.addEventListener('blur', () => { t.readOnly = true; });
+})();
+
+// Pencil taps in the toolbars go straight to the button under the tip. Stopping the
+// touch also stops Scribble from treating the tap as handwriting.
+let penClickAt = -1e9, penClickEl = null;
+for (const bar of [$('toolbar'), $('spotBar')]) {
+  bar.addEventListener('touchstart', e => {
+    if (e.target.closest('input:not([readonly]), select, textarea')) return;
+    if ([...e.changedTouches].some(t => t.touchType === 'stylus')) e.preventDefault();
+  }, { passive: false });
+  bar.addEventListener('pointerup', e => {
+    if (e.pointerType !== 'pen') return;
+    const el = e.target.closest('button, input[readonly]');
+    if (!el || el.disabled) return;
+    penClickAt = performance.now();
+    penClickEl = el;
+    el.click();
+  });
+  // If the browser also sends its own click for that tap, ignore the duplicate.
+  bar.addEventListener('click', e => {
+    if (e.isTrusted && penClickEl && e.target.closest('button, input') === penClickEl && performance.now() - penClickAt < 400) {
+      e.stopPropagation(); e.preventDefault();
+    }
+    penClickEl = null;
+  }, true);
+}
 $('undoBtn').addEventListener('click', undo);
 $('redoBtn').addEventListener('click', redo);
 

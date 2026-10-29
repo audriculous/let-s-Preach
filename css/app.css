@@ -186,6 +186,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
   text-transform: uppercase; padding: 6px 8px; border-radius: 12px; color: var(--ink);
 }
 .study-title:focus { outline: none; background: var(--card); }
+.study-title[readonly] { cursor: pointer; -webkit-user-select: none; user-select: none; }
 
 .swatch {
   width: 32px; height: 32px; border-radius: 50%; border: 0; margin: 0 2px; cursor: pointer;
