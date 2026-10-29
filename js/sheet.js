@@ -80,6 +80,7 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       <ol class="points" id="points"></ol>
       <button type="button" class="text-link" id="addPointBtn">+ Add a point</button>
       <label class="opt-row"><span>Show the breakup on the page</span><input type="checkbox" class="switch" id="showBreakup"></label>
+      <label class="opt-row"><span>Show point titles in the text</span><input type="checkbox" class="switch" id="showTitles"></label>
 
       <p class="eyebrow">Application</p>
       <p class="hint">Write with the Pencil. What does this mean on Monday for the young adults in the room?</p>
@@ -112,6 +113,8 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     keyboardOnPencil(pane.querySelector('[data-f=bigIdea]'));
     $('showBreakup').checked = o.showOnPage !== false;
     $('showBreakup').addEventListener('change', e => { o.showOnPage = e.target.checked; save(); marks.render(); });
+    $('showTitles').checked = o.titlesOnPage !== false;
+    $('showTitles').addEventListener('change', e => { o.titlesOnPage = e.target.checked; save(); marks.render(); });
     $('suggestBtn').addEventListener('click', suggest);
     $('suggestBtn').disabled = verses.length < 2;
     if (verses.length > 1) {
@@ -175,7 +178,7 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       };
       showStart(starts[i]);
       autoGrow(notes);
-      title.addEventListener('input', () => { p.title = title.value; save(); rescan(); });
+      title.addEventListener('input', () => { p.title = title.value; save(); rescan(); remark(); });
       notes.addEventListener('input', () => { p.notes = notes.value; autoGrow(notes); save(); rescan(); });
       vv.addEventListener('input', () => {
         p.verses = vv.value; save();

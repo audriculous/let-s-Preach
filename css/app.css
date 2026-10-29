@@ -642,3 +642,13 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
 .ref-group { padding: 10px 0; border-bottom: 1px solid var(--chip-line); }
 .ref-verse { font-family: var(--display); font-weight: 800; font-style: italic; font-size: 20px; text-transform: uppercase; margin-bottom: 2px; }
 .sheet-head .seg button { padding: 8px 14px; font-size: 15px; }
+
+/* Point titles shown in the text */
+.mk-label {
+  background: var(--c); color: var(--accent-ink); border-radius: 999px;
+  display: flex; align-items: center; padding: 0 0.65em; box-sizing: border-box;
+  font-family: var(--display); font-weight: 800; font-style: italic; text-transform: uppercase;
+  letter-spacing: 0.06em; white-space: nowrap; overflow: hidden; line-height: 1;
+}
+.mk-label::before { content: attr(data-t); }
+.mk-label.light { color: #fff; }

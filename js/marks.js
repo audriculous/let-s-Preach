@@ -154,6 +154,8 @@ export class Marks {
         if (next - t.y > 40) items.push({ kind: 'band', x: bx + 15, y: t.y + 40, w: 4, h: next - t.y - 44, color });
         if (k > 0 && !v.paraStart) items.push({ kind: 'cut', x: t.x - 7, y: t.y, w: 0, h: font * 1.45, color });
         items.push({ kind: 'badge', x: bx, y: t.y + font * 0.1, w: 34, h: 34, n: i + 1, color, light: !DARK_TEXT.has(color) });
+        const title = (o.points[i].title || '').trim();
+        if (title && o.titlesOnPage !== false) items.push(titleLabel(title, t, v, { g, left, font, color, light: !DARK_TEXT.has(color), passageEl: this.passageEl, words }));
       });
     }
 
@@ -161,7 +163,61 @@ export class Marks {
     this.layer.innerHTML = items.map(it => {
       const pos = `left:${it.x.toFixed(1)}px;top:${it.y.toFixed(1)}px;width:${it.w.toFixed(1)}px;height:${it.h.toFixed(1)}px;--c:${it.color}`;
       if (it.kind === 'badge') return `<div class="mk-badge${it.light ? ' light' : ''}" data-n="${it.n}" style="${pos}"></div>`;
+      if (it.kind === 'label') return `<div class="mk-label${it.light ? ' light' : ''}" data-t="${attr(it.text)}" style="${pos};font-size:${it.fs.toFixed(1)}px"></div>`;
       return `<div class="mk-${it.kind}" style="${pos}"></div>`;
     }).join('');
   }
 }
+
+// ---------- point titles on the page ----------
+
+const LABEL_FONT = (fs) => `italic 800 ${fs}px 'Barlow Condensed', 'Arial Narrow', sans-serif`;
+let measureCtx = null;
+function labelWidth(text, fs) {
+  measureCtx = measureCtx || document.createElement('canvas').getContext('2d');
+  measureCtx.font = LABEL_FONT(fs);
+  return measureCtx.measureText(text.toUpperCase()).width + fs * 0.06 * text.length;
+}
+
+// A small pill with the point's title, in the gap above the line where the point starts
+// (or beside the translators' heading, when the point starts right under one). It is
+// drawn over the page, so the Bible text never moves.
+function titleLabel(text, t, v, { g, left, font, color, light, passageEl, words }) {
+  const label = text.length > 60 ? text.slice(0, 58) + '…' : text;
+  const size = h => { const fs = h * 0.68; return { h, fs, w: labelWidth(label, fs) + fs * 1.3 }; };
+  const block = v.el.closest('p, div');
+  const head = block && block.previousElementSibling;
+  if (v.heading && head && head.matches('h3, h4') && !passageEl.classList.contains('no-headings')) {
+    const r = head.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(head);
+    const tr = range.getBoundingClientRect();
+    const { h, fs, w } = size(22);
+    const x = (tr.right - g.r.left) / g.scale + 16;
+    const y = (r.top + r.height / 2 - g.r.top) / g.scale - h / 2;
+    return { kind: 'label', x, y, w, h, fs, text: label, color, light };
+  }
+  // Measure the real gap between this line and the one above it.
+  const mr = v.el.getBoundingClientRect();
+  const mid = (mr.top + mr.height / 2 - g.r.top) / g.scale;
+  const line = words.filter(w => Math.abs(w.y + w.h / 2 - mid) < font * 0.6);
+  const lineTop = line.length ? Math.min(...line.map(w => w.y)) : t.y;
+  const lineBottom = line.length ? Math.max(...line.map(w => w.y + w.h)) : t.y + font * 1.2;
+  const above = words.filter(w => w.y + w.h <= lineTop + 1);
+  const prevBottom = above.length ? Math.max(...above.map(w => w.y + w.h)) : lineTop - 40;
+  const gap = lineTop - prevBottom;
+  if (gap >= 15) {
+    const { h, fs, w } = size(Math.min(24, gap - 3));
+    return { kind: 'label', x: v.paraStart ? left : t.x, y: prevBottom + (gap - h) / 2, w, h, fs, text: label, color, light };
+  }
+  // No room between the lines: sit in the margin beside the line where the point starts.
+  const width = parseFloat(passageEl.style.width) || 560;
+  const { h, fs, w } = size(20);
+  return { kind: 'label', x: left + width + 14, y: (lineTop + lineBottom) / 2 - h / 2, w, h, fs, text: label, color, light };
+}
+
+function attr(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+export { LABEL_FONT };

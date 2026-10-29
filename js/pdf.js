@@ -7,6 +7,7 @@
 
 import { drawStroke, PAGE_W } from './ink.js';
 import { PAD_W } from './pad.js';
+import { LABEL_FONT } from './marks.js';
 
 const PAGE_H = Math.round(PAGE_W * 297 / 210); // A4 in logical px
 const RES = 2;                                  // canvas px per logical px
@@ -191,6 +192,14 @@ function drawMarks(ctx, marks, inSlice) {
       ctx.globalAlpha = 1; ctx.strokeStyle = m.color; ctx.lineWidth = 2.5; ctx.stroke();
     } else if (m.kind === 'under') {
       ctx.fillStyle = m.color; roundRect(ctx, m.x, m.y, m.w, m.h, 2); ctx.fill();
+    } else if (m.kind === 'label') {
+      ctx.fillStyle = m.color;
+      roundRect(ctx, m.x, m.y, m.w, m.h, m.h / 2); ctx.fill();
+      ctx.fillStyle = m.light ? '#ffffff' : '#1a1a1a';
+      ctx.font = LABEL_FONT(m.fs);
+      ctx.textBaseline = 'middle';
+      let x = m.x + m.fs * 0.65;
+      for (const ch of m.text.toUpperCase()) { ctx.fillText(ch, x, m.y + m.h / 2 + 0.5); x += ctx.measureText(ch).width + m.fs * 0.06; }
     } else if (m.kind === 'band') {
       ctx.globalAlpha = 0.55; ctx.fillStyle = m.color; roundRect(ctx, m.x, m.y, m.w, m.h, 2); ctx.fill();
     } else if (m.kind === 'cut') {
