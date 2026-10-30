@@ -13,6 +13,8 @@
 //      POST /backup     { studies } -> { day }   (one snapshot per day, last 30 kept)
 //      GET  /backups              -> { days: [...] }
 //      GET  /backup?day=YYYY-MM-DD -> { studies }
+//
+// 3. Roster relay (see sheet() below).
 
 const VERSIONS = new Set(['NIV', 'ESV', 'NASB', 'NASB1995', 'CSB', 'NKJV', 'KJV', 'NLT', 'NRSVUE']);
 const KEEP_BACKUPS = 30;
@@ -33,6 +35,7 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
     const url = new URL(request.url);
     if (url.pathname === '/' || url.pathname === '') return passage(url);
+    if (url.pathname === '/sheet') return sheet(url);
     try {
       return await sync(request, url, env);
     } catch (e) {
@@ -61,6 +64,21 @@ async function passage(url) {
   return new Response(await res.text(), {
     status: res.status,
     headers: { ...CORS, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=86400' },
+  });
+}
+
+// 3. Preaching roster: reads a Google Sheet as CSV for the app, only from
+//    docs.google.com/spreadsheets.  GET /sheet?url=<published CSV link>
+async function sheet(url) {
+  let target;
+  try { target = new URL(url.searchParams.get('url') || ''); } catch { return new Response('Bad url', { status: 400, headers: CORS }); }
+  if (target.protocol !== 'https:' || target.hostname !== 'docs.google.com' || !target.pathname.startsWith('/spreadsheets/')) {
+    return new Response('Only Google Sheets links', { status: 400, headers: CORS });
+  }
+  const res = await fetch(target.toString(), { redirect: 'follow', cf: { cacheTtl: 300 } });
+  return new Response(await res.text(), {
+    status: res.status,
+    headers: { ...CORS, 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'public, max-age=300' },
   });
 }
 

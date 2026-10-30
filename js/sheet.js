@@ -9,6 +9,15 @@ import { scanSensitive, CHECKLIST } from './checks.js';
 
 export const VERSIONS = ['NIV', 'ESV', 'NASB', 'NASB1995', 'CSB', 'NKJV', 'KJV', 'NLT', 'NRSVUE'];
 
+// Questions from Christ-centred (redemptive) preaching, to keep the sermon from
+// becoming moralism and to sharpen the big idea.
+export const PROMPTS = [
+  { key: 'god', tag: 'God', q: 'What does this passage show about God?', hint: 'His character, promises and actions here.' },
+  { key: 'fcf', tag: 'Our need', q: 'What fallen condition does it address?', hint: 'The need it spoke to for its first hearers, and the same need in the room today.' },
+  { key: 'christ', tag: 'Christ', q: 'How does it point to Christ?', hint: 'Does it predict, prepare for, reflect, or result from his work? Where does it sit in the Bible\u2019s story?' },
+  { key: 'response', tag: 'Response', q: 'What response of faith does it call for?', hint: 'Not just \u201Ctry harder\u201D: what does grace make possible, and why would we want it?' },
+];
+
 export function emptyOutline() {
   return { bigIdea: '', points: [], application: '', illustrations: '', pads: {}, checks: {}, showOnPage: true };
 }
@@ -64,6 +73,12 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       <textarea class="field sheet-field" data-f="bigIdea" rows="2" placeholder="The whole passage in one sentence"></textarea>
 
       <div class="sheet-row">
+        <p class="eyebrow">Christ-centred</p>
+        <button type="button" class="text-link" id="ccToggle"></button>
+      </div>
+      <div id="cc"></div>
+
+      <div class="sheet-row">
         <p class="eyebrow">Breakup</p>
         <button type="button" class="chip-btn small" id="suggestBtn">Suggest a breakup</button>
       </div>
@@ -111,6 +126,8 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       requestAnimationFrame(() => pad.render());
     }
     keyboardOnPencil(pane.querySelector('[data-f=bigIdea]'));
+    renderPrompts();
+    $('ccToggle').addEventListener('click', () => { o.ccHidden = !o.ccHidden; save(); renderPrompts(); });
     $('showBreakup').checked = o.showOnPage !== false;
     $('showBreakup').addEventListener('change', e => { o.showOnPage = e.target.checked; save(); marks.render(); });
     $('showTitles').checked = o.titlesOnPage !== false;
@@ -196,6 +213,42 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       });
       ol.appendChild(li);
     });
+  }
+
+  // Christ-centred prompts: handwrite (or type) an answer to each.
+  function renderPrompts() {
+    const o = outline(), box = $('cc');
+    if (!box) return;
+    o.cc = o.cc || {};
+    $('ccToggle').textContent = o.ccHidden ? 'Show prompts' : 'Hide';
+    box.hidden = !!o.ccHidden;
+    box.innerHTML = '';
+    if (o.ccHidden) return;
+    for (const pr of PROMPTS) {
+      const a = o.cc[pr.key] = o.cc[pr.key] || { text: '', mode: 'write', pad: emptyPad(130) };
+      const div = document.createElement('div');
+      div.className = 'cc';
+      div.innerHTML = `<div class="cc-head"><span class="cc-tag">${pr.tag}</span><span class="cc-q">${esc(pr.q)}</span></div>
+        <p class="cc-hint">${esc(pr.hint)}</p><div class="cc-body"></div>
+        <button type="button" class="text-link cc-mode">${a.mode === 'type' ? 'Write with the Pencil instead' : 'Type instead'}</button>`;
+      const body = div.querySelector('.cc-body');
+      if (a.mode === 'type') {
+        const t = document.createElement('textarea');
+        t.className = 'field sheet-field';
+        t.rows = 2;
+        t.value = a.text;
+        t.addEventListener('input', () => { a.text = t.value; autoGrow(t); save(); rescan(); });
+        body.appendChild(t);
+        keyboardOnPencil(t);
+        requestAnimationFrame(() => autoGrow(t));
+      } else {
+        if (a.text) { const p = document.createElement('p'); p.className = 'cc-typed'; p.textContent = a.text; body.appendChild(p); }
+        const pad = new Pad(body, a.pad, { onChange: save, pushAction, pen, fingerDraw });
+        requestAnimationFrame(() => pad.render());
+      }
+      div.querySelector('.cc-mode').addEventListener('click', () => { a.mode = a.mode === 'type' ? 'write' : 'type'; save(); renderPrompts(); });
+      box.appendChild(div);
+    }
   }
 
   // Sub-points: one line each. Return adds the next one, Backspace on an empty one removes it.
@@ -382,6 +435,7 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     const s = study(), o = s.outline;
     const sources = [
       { where: 'Big idea', text: o.bigIdea },
+      ...PROMPTS.map(pr => ({ where: pr.tag, text: o.cc && o.cc[pr.key] ? o.cc[pr.key].text : '' })),
       ...o.points.flatMap((p, i) => [{ where: `Point ${i + 1}`, text: [p.title, ...(p.subs || []), p.notes].join('\n') }]),
       { where: 'Application', text: o.application },
       { where: 'Illustrations', text: o.illustrations },
@@ -402,6 +456,10 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     if (s.series) lines.push('Series: ' + s.series);
     lines.push('');
     if (o.bigIdea) lines.push('BIG IDEA', o.bigIdea, '');
+    for (const pr of PROMPTS) {
+      const a = o.cc && o.cc[pr.key];
+      if (a && (a.text || (a.pad && a.pad.strokes.length))) lines.push(pr.tag.toUpperCase(), a.text || '(handwritten, see the PDF)', '');
+    }
     o.points.forEach((p, i) => {
       lines.push(`${i + 1}. ${p.title || 'Point ' + (i + 1)}${p.verses ? ' (' + p.verses + ')' : ''}`);
       (p.subs || []).filter(Boolean).forEach((sub, j) => lines.push(`   ${String.fromCharCode(97 + (j % 26))}. ${sub}`));

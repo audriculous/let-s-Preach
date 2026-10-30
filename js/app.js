@@ -7,6 +7,8 @@ import { Marks, SPOT_COLORS } from './marks.js';
 import { initSheet, emptyOutline } from './sheet.js';
 import { initSync, makeSyncCode, timeAgo } from './sync.js';
 import { initRefs } from './refs.js';
+import { initPreach, addDeck } from './preach.js';
+import * as roster from './roster.js';
 import { walkVerses } from './verses.js';
 
 const $ = id => document.getElementById(id);
@@ -184,6 +186,8 @@ function matches(s, q) {
 }
 
 async function renderLibrary() {
+  renderNextUp();
+  renderDecks();
   const all = (await db.allStudies()).sort((a, b) => b.updated - a.updated);
   const q = $('searchInput').value.trim().toLowerCase();
   renderFilters(all);
@@ -270,8 +274,8 @@ function newStudy(passage) {
   };
 }
 
-async function createAndOpen(passage) {
-  const s = newStudy(passage);
+async function createAndOpen(passage, extra = {}) {
+  const s = Object.assign(newStudy(passage), extra);
   await db.putStudy(s);
   openStudy(s.id);
 }
@@ -318,6 +322,9 @@ $('blankBtn').addEventListener('click', () => {
 
 $('settingsBtn').addEventListener('click', () => {
   $('proxyInput').value = settings.workerUrl;
+  $('rosterInput').value = settings.rosterUrl || '';
+  $('rosterName').value = settings.rosterName || '';
+  rosterStatusText();
   $('syncCodeInput').value = settings.syncCode || '';
   $('syncOn').checked = settings.syncOn !== false;
   $('backupList').hidden = true;
@@ -328,7 +335,11 @@ $('syncCodeInput').addEventListener('input', syncStatusText);
 $('settingsDialog').addEventListener('close', () => {
   if ($('settingsDialog').returnValue !== 'ok') return;
   settings.workerUrl = $('proxyInput').value.trim();
+  const rosterChanged = (settings.rosterUrl || '') !== $('rosterInput').value.trim() || (settings.rosterName || '') !== $('rosterName').value.trim();
+  settings.rosterUrl = $('rosterInput').value.trim();
+  settings.rosterName = $('rosterName').value.trim();
   saveSettings();
+  if (rosterChanged) refreshRoster(true);
   settings.syncCode = $('syncCodeInput').value.trim();
   settings.syncOn = $('syncOn').checked;
   saveSettings();
@@ -1046,6 +1057,164 @@ $('pdfBtn2').addEventListener('click', doExportPdf);
 
 // ---------- misc ----------
 
+// ---------- preaching from a PDF ----------
+
+const preach = initPreach({ toast, prefs, savePrefs });
+
+async function renderDecks() {
+  let decks = [];
+  try { decks = await db.allDecks(); } catch {}
+  decks.sort((a, b) => Math.max(b.opened || 0, b.created) - Math.max(a.opened || 0, a.created));
+  const ul = $('deckList');
+  ul.innerHTML = '';
+  $('deckHint').hidden = decks.length > 0;
+  for (const d of decks) {
+    const li = document.createElement('li');
+    li.className = 'study-item deck-item';
+    const when = new Date(d.opened || d.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    li.innerHTML = `<span class="deck-play"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></svg></span>
+      <div class="meta"><div class="title"></div><div class="sub"></div></div>
+      <button class="del" aria-label="Remove"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3"/></svg></button>`;
+    li.querySelector('.title').textContent = d.name;
+    li.querySelector('.sub').textContent = [`${d.pages} page${d.pages === 1 ? '' : 's'}`, d.studyId ? 'from your study' : 'PDF', (d.opened ? 'opened ' : 'added ') + when].join(' · ');
+    li.addEventListener('click', e => { if (!e.target.closest('.del')) preach.open(d); });
+    li.querySelector('.del').addEventListener('click', async () => {
+      if (!confirm(`Remove "${d.name}" from Ready to preach?`)) return;
+      await db.deleteDeck(d.id);
+      renderDecks();
+    });
+    ul.appendChild(li);
+  }
+}
+
+async function importPdf(file) {
+  if (!file) return;
+  if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) { toast('That is not a PDF'); return; }
+  $('busyText').textContent = 'Opening your PDF…';
+  $('busy').hidden = false;
+  try {
+    const deck = await addDeck(file, file.name);
+    $('busy').hidden = true;
+    await renderDecks();
+    preach.open(deck);
+  } catch (err) {
+    console.error(err);
+    toast('Could not read that PDF');
+  } finally {
+    $('busy').hidden = true;
+    $('busyText').textContent = 'Making your PDF…';
+  }
+}
+
+$('importPdfBtn').addEventListener('click', () => $('pdfFile').click());
+$('pdfFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; importPdf(f); });
+// Drag a PDF in from the Files app (Split View or Slide Over) onto the home screen.
+$('library').addEventListener('dragover', e => { if ([...(e.dataTransfer?.items || [])].some(i => i.kind === 'file')) { e.preventDefault(); $('library').classList.add('dropping'); } });
+$('library').addEventListener('dragleave', e => { if (e.target === $('library')) $('library').classList.remove('dropping'); });
+$('library').addEventListener('drop', e => {
+  e.preventDefault();
+  $('library').classList.remove('dropping');
+  const f = [...(e.dataTransfer?.files || [])].find(x => /pdf$/i.test(x.type) || /\.pdf$/i.test(x.name));
+  if (f) importPdf(f); else toast('Drop a PDF to preach from it');
+});
+
+// Preach straight from a study: its marked-up page and outline as a PDF.
+$('preachStudyBtn').addEventListener('click', async () => {
+  if (!study) return;
+  $('menuPanel').hidden = true;
+  $('busyText').textContent = 'Getting your study ready to preach…';
+  $('busy').hidden = false;
+  try {
+    await saveNow();
+    marks.render();
+    const blob = await exportPdf({ page, passageEl, strokes: ink.strokes, pageH: ink.pageH, title: study.title, marks: marks.items, study });
+    const deck = await addDeck(blob, study.title, { id: 'study-' + study.id, studyId: study.id });
+    $('busy').hidden = true;
+    preach.open(deck);
+  } catch (err) {
+    console.error(err);
+    toast('Could not get the study ready');
+  } finally {
+    $('busy').hidden = true;
+    $('busyText').textContent = 'Making your PDF…';
+  }
+});
+
+// ---------- preaching roster ----------
+
+const normRef = r => String(r || '').toLowerCase().replace(/\s+/g, '').replace(/[–—]/g, '-');
+const niceDate = d => new Date(d + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+
+function myUpcoming() {
+  const data = roster.loadCached();
+  if (!data || !settings.rosterUrl) return [];
+  const rows = data.hasPreacher ? roster.mine(data.rows, settings.rosterName) : data.rows;
+  return roster.upcoming(rows);
+}
+
+async function renderNextUp() {
+  const up = myUpcoming();
+  $('nextUp').hidden = !up.length;
+  if (!up.length) return;
+  const next = up[0];
+  const days = Math.round((new Date(next.date + 'T12:00') - new Date()) / 864e5);
+  const when = days <= 0 ? 'Today' : days === 1 ? 'Tomorrow' : days < 7 ? `This ${new Date(next.date + 'T12:00').toLocaleDateString(undefined, { weekday: 'long' })}` : `In ${days} days`;
+  $('nextWhen').textContent = `Next up · ${when} · ${niceDate(next.date)}`;
+  $('nextPassage').textContent = next.passage;
+  $('nextMeta').textContent = [next.title, next.series, next.service].filter(Boolean).join(' · ') || ' ';
+  const existing = (await db.allStudies()).find(s => s.rosterDate === next.date && normRef(s.rosterPassage) === normRef(next.passage)) ||
+    (await db.allStudies()).find(s => normRef(s.passage.reference) === normRef(next.passage));
+  $('nextOpen').querySelector('span').textContent = existing ? 'Continue study' : 'Open passage';
+  $('nextOpen').onclick = () => existing ? openStudy(existing.id) : openRosterPassage(next);
+  $('nextLater').innerHTML = up.slice(1, 4).map(r => `<li><span>${esc(niceDate(r.date))}</span><b>${esc(r.passage)}</b>${r.series ? `<em>${esc(r.series)}</em>` : ''}</li>`).join('');
+  const data = roster.loadCached();
+  $('rosterAge').textContent = data ? 'Roster checked ' + timeAgo(data.fetchedAt) : '';
+}
+
+async function openRosterPassage(r) {
+  const btn = $('nextOpen');
+  btn.disabled = true;
+  btn.querySelector('span').textContent = `Getting ${r.passage}…`;
+  try {
+    const passage = await fetchPassage(r.passage, $('versionSelect').value || 'NIV', settings.workerUrl);
+    await createAndOpen(passage, {
+      title: r.title || passage.reference, series: r.series || '', preached: r.date, rosterDate: r.date, rosterPassage: r.passage,
+    });
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    btn.disabled = false;
+    renderNextUp();
+  }
+}
+
+async function refreshRoster(force) {
+  if (!settings.rosterUrl) { renderNextUp(); return; }
+  const data = roster.loadCached();
+  if (!force && data && Date.now() - data.fetchedAt < 60 * 60 * 1000) return;
+  try {
+    await roster.fetchRoster(settings.rosterUrl, settings.workerUrl);
+    if (force) {
+      const n = myUpcoming().length;
+      toast(n ? `Roster updated: ${n} upcoming for you` : 'Roster read, but nothing upcoming with your name');
+    }
+  } catch (err) {
+    if (force) toast(err.message);
+  }
+  if (!study) renderNextUp();
+}
+
+function rosterStatusText() {
+  const el = $('rosterStatus');
+  const data = roster.loadCached();
+  if (!settings.rosterUrl) { el.textContent = ''; return; }
+  if (!data) { el.textContent = 'Not read yet.'; return; }
+  const mineRows = data.hasPreacher ? roster.mine(data.rows, settings.rosterName) : data.rows;
+  el.textContent = `${data.rows.length} rows read ${timeAgo(data.fetchedAt)}. ${data.hasPreacher ? `${mineRows.length} with ${settings.rosterName ? '"' + settings.rosterName + '"' : 'your name (add it above)'}.` : 'No preacher column, so every row is yours.'} ${roster.upcoming(mineRows).length} upcoming.`;
+}
+
+$('rosterRefresh').addEventListener('click', () => refreshRoster(true));
+
 function setGreeting() {
   const h = new Date().getHours();
   $('greeting').textContent = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
@@ -1066,7 +1235,7 @@ function toast(msg) {
 
 // Keyboard shortcuts (Magic Keyboard / Smart Keyboard)
 document.addEventListener('keydown', e => {
-  if (!study || e.target.closest('input, textarea, select, .note, dialog')) return;
+  if (!study || !$('preach').hidden || e.target.closest('input, textarea, select, .note, dialog')) return;
   const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if (e.key === 'Backspace' || e.key === 'Delete') { if (ink.selection) { e.preventDefault(); ink.deleteSelection(); } return; }
@@ -1079,5 +1248,6 @@ document.addEventListener('gesturestart', e => e.preventDefault());
 
 db.requestPersistence();
 sync.syncNow().catch(() => {});
+refreshRoster(false);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 showLibrary();

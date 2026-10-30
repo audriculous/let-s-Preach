@@ -8,6 +8,7 @@
 import { drawStroke, PAGE_W } from './ink.js';
 import { PAD_W } from './pad.js';
 import { LABEL_FONT } from './marks.js';
+import { PROMPTS } from './sheet.js';
 
 const PAGE_H = Math.round(PAGE_W * 297 / 210); // A4 in logical px
 const RES = 2;                                  // canvas px per logical px
@@ -235,7 +236,8 @@ function layoutOutline(study) {
   const o = study.outline;
   if (!o) return [];
   const inked = k => o.pads && o.pads[k] && o.pads[k].strokes.length ? o.pads[k] : null;
-  const hasContent = o.bigIdea || o.application || o.illustrations || inked('application') || inked('illustrations') ||
+  const ccDone = PROMPTS.some(pr => o.cc && o.cc[pr.key] && (o.cc[pr.key].text || (o.cc[pr.key].pad && o.cc[pr.key].pad.strokes.length)));
+  const hasContent = ccDone || o.bigIdea || o.application || o.illustrations || inked('application') || inked('illustrations') ||
     (o.points || []).some(p => p.title || p.notes || p.verses || (p.subs || []).some(Boolean));
   if (!hasContent) return [];
   const blocks = [];
@@ -244,6 +246,14 @@ function layoutOutline(study) {
   add(T.title, study.title, 4);
   add(T.muted, [study.passage.reference !== study.title ? study.passage.reference : '', study.passage.version].filter(Boolean).join(' '), 4);
   if (o.bigIdea) { add(T.eyebrow, 'Big idea', 30); add(T.body, o.bigIdea, 4); }
+  for (const pr of PROMPTS) {
+    const a = o.cc && o.cc[pr.key];
+    const inkd = a && a.pad && a.pad.strokes.length ? a.pad : null;
+    if (!a || !(a.text || inkd)) continue;
+    add(T.eyebrow, pr.tag + ': ' + pr.q, 22);
+    add(T.body, a.text, 4);
+    if (inkd) blocks.push({ pad: inkd, gap: 6, indent: 0 });
+  }
   (o.points || []).forEach((p, i) => {
     add(T.point, `${i + 1}. ${p.title || 'Point ' + (i + 1)}`, i === 0 ? 34 : 24);
     add(T.muted, p.verses, 2, 34);

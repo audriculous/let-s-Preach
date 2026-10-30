@@ -43,6 +43,15 @@
 
     <h1 id="greeting" class="greeting">Good morning</h1>
 
+    <section id="nextUp" class="card next-card" hidden>
+      <p class="eyebrow" id="nextWhen">Next up</p>
+      <h2 class="card-title" id="nextPassage"></h2>
+      <p class="card-body" id="nextMeta"></p>
+      <button type="button" class="pill" id="nextOpen"><span>Open passage</span></button>
+      <ul id="nextLater" class="next-later"></ul>
+      <div class="next-foot"><span id="rosterAge"></span><button type="button" class="text-link" id="rosterRefresh">Refresh roster</button></div>
+    </section>
+
     <form id="fetchForm" class="card" autocomplete="off">
       <p class="eyebrow">New study. Pick a passage</p>
       <h2 class="card-title">Open a passage</h2>
@@ -77,6 +86,20 @@
       <div id="filterChips" class="filter-chips" role="group" aria-label="Filter by series or tag"></div>
     </div>
     <p id="noMatches" class="hint no-matches" hidden>No studies match.</p>
+
+
+    <div id="preachBlock">
+      <div class="list-head">
+        <p class="eyebrow list-eyebrow">Ready to preach</p>
+        <button type="button" class="chip-btn small" id="importPdfBtn">
+          <svg viewBox="0 0 24 24"><path d="M7 4h7l4 4v12H7z"/><path d="M14 4v4h4"/><path d="M12 11v6M9.5 14.5L12 17l2.5-2.5"/></svg>
+          <span>Preach a PDF</span>
+        </button>
+      </div>
+      <p class="hint" id="deckHint">Import your sermon PDF (from Word, Pages or Google Docs) to preach from it full screen with a timer. Pick it from Files, or drag it here.</p>
+      <ul id="deckList" class="study-list"></ul>
+      <input type="file" id="pdfFile" accept="application/pdf,.pdf" hidden>
+    </div>
 
     <div id="pinnedBlock" hidden>
       <p class="eyebrow list-eyebrow">Pinned</p>
@@ -202,6 +225,10 @@
         <button class="icon-chip small" id="menuClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </div>
 
+      <button class="pill pill-block" id="preachStudyBtn">
+        <svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></svg>
+        <span>Preach this study</span>
+      </button>
       <button class="pill pill-block" id="pdfBtn2">
         <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M6 11H5a1 1 0 00-1 1v8a1 1 0 001 1h14a1 1 0 001-1v-8a1 1 0 00-1-1h-1"/></svg>
         <span>Export PDF</span>
@@ -316,6 +343,12 @@
       <input id="proxyInput" class="field" type="url" placeholder="https://lets-preach.yourname.workers.dev" aria-label="Passage fetcher URL">
       <p class="hint">Bible Gateway does not let web apps read its pages directly, so the app goes through a small relay. It tries free public relays first. For reliable fetching, set up your own free Cloudflare Worker (see the README) and paste its URL here.</p>
 
+      <h3 class="card-title">Preaching roster</h3>
+      <p class="hint">Paste the link to your roster in Google Sheets. Easiest: in Sheets choose File, Share, Publish to web, pick the roster tab and "Comma-separated values (.csv)", then copy that link. The sheet needs headings like Date, Preacher and Passage (Series and Title are used if there).</p>
+      <input id="rosterInput" class="field" type="url" placeholder="https://docs.google.com/spreadsheets/…" aria-label="Roster link">
+      <input id="rosterName" class="field" type="text" placeholder="Your name as it appears on the roster" aria-label="Your name on the roster" autocomplete="off">
+      <p class="hint" id="rosterStatus"></p>
+
       <h3 class="card-title">Sync and backup</h3>
       <p class="hint">Uses the same Worker to keep your iPad and laptop in step, and saves a backup of every study once a day (the last 30 days are kept). Put the same sync code on each device. Keep it private: anyone with it can see your studies.</p>
       <div class="code-row">
@@ -336,6 +369,35 @@
       </div>
     </form>
   </dialog>
+
+  <!-- ============ PREACH ============ -->
+  <section id="preach" class="preach" hidden>
+    <div class="preach-bar">
+      <button type="button" class="tb-btn" id="preachClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="preach-title" id="preachTitle"></div>
+      <div class="preach-timer">
+        <button type="button" class="preach-time" id="preachTime" title="Tap to switch count up / count down">0:00</button>
+        <span class="preach-target" id="preachTarget"></span>
+      </div>
+      <span class="preach-clock" id="preachClock"></span>
+      <button type="button" class="preach-lock" id="preachLock" aria-label="Lock">
+        <svg viewBox="0 0 24 24" class="lk-open"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 017.6-1.8"/></svg>
+        <svg viewBox="0 0 24 24" class="lk-shut"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>
+      </button>
+    </div>
+    <div class="preach-progress"><span id="preachBar"></span></div>
+    <div class="preach-controls">
+      <button type="button" class="pill" id="preachStartLock"><span>Start and lock</span></button>
+      <button type="button" class="chip-btn" id="preachStart">Start</button>
+      <button type="button" class="chip-btn" id="preachReset">Reset</button>
+      <select class="field select small" id="preachTargetSel" aria-label="Sermon length"></select>
+      <div class="seg"><button type="button" data-pzoom="-1" aria-label="Smaller">A−</button><button type="button" data-pzoom="1" aria-label="Bigger">A+</button></div>
+      <button type="button" class="chip-btn" id="preachDim">Dim</button>
+    </div>
+    <div class="preach-pages" id="preachPages"></div>
+    <div class="preach-pageno" id="preachPageNo"></div>
+    <div class="preach-locknote">Locked. Hold <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg> to unlock</div>
+  </section>
 
   <div id="busy" class="busy" hidden><div class="busy-card"><div class="spinner"></div><span id="busyText">Making your PDF…</span></div></div>
   <div id="toast" class="toast" hidden></div>
