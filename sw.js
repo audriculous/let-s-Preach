@@ -1,5 +1,5 @@
 // Offline support: cache the app shell. Bump VERSION when files change.
-const VERSION = 'lp-v15';
+const VERSION = 'lp-v16';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'css/fonts.css', 'js/app.js', 'js/ink.js', 'js/bible.js', 'js/db.js', 'js/pdf.js',
   'js/ruler.js', 'js/marks.js', 'js/verses.js', 'js/sheet.js', 'js/checks.js', 'js/sync.js', 'js/pad.js', 'js/refs.js', 'js/preach.js', 'js/roster.js', 'vendor/pdfjs/pdf.min.js', 'vendor/pdfjs/pdf.worker.min.js',

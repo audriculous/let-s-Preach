@@ -657,6 +657,9 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
 .next-card { margin: 0 0 18px; }
 .next-card .card-title { font-size: 46px; }
 .next-card .card-body { margin-bottom: 14px; }
+.next-ready { margin-left: 12px; font-size: 14px; font-weight: 700; color: var(--accent, #4d7a66); }
+.next-ready::before { content: '✓ '; }
+.next-later li.ready b::after { content: ' ✓'; color: var(--accent, #4d7a66); }
 .next-later { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 6px; }
 .next-later li { display: flex; gap: 12px; align-items: baseline; font-size: 16px; }
 .next-later li span { color: var(--muted); font-weight: 600; min-width: 92px; }

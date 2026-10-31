@@ -48,6 +48,7 @@
       <h2 class="card-title" id="nextPassage"></h2>
       <p class="card-body" id="nextMeta"></p>
       <button type="button" class="pill" id="nextOpen"><span>Open passage</span></button>
+      <span class="next-ready" id="nextReady" hidden>Ready for you</span>
       <ul id="nextLater" class="next-later"></ul>
       <div class="next-foot"><span id="rosterAge"></span><button type="button" class="text-link" id="rosterRefresh">Refresh roster</button></div>
     </section>
@@ -344,9 +345,12 @@
       <p class="hint">Bible Gateway does not let web apps read its pages directly, so the app goes through a small relay. It tries free public relays first. For reliable fetching, set up your own free Cloudflare Worker (see the README) and paste its URL here.</p>
 
       <h3 class="card-title">Preaching roster</h3>
-      <p class="hint">Paste the link to your roster in Google Sheets. Easiest: in Sheets choose File, Share, Publish to web, pick the roster tab and "Comma-separated values (.csv)", then copy that link. The sheet needs headings like Date, Preacher and Passage (Series and Title are used if there).</p>
+      <p class="hint">Paste the link to your roster in Google Sheets. Easiest: in Sheets choose File, Share, Publish to web, pick the roster tab and "Comma-separated values (.csv)", then copy that link. It updates itself whenever the sheet changes. The sheet needs headings like Date, Preacher and Passage (Series and Title are used if there).</p>
       <input id="rosterInput" class="field" type="url" placeholder="https://docs.google.com/spreadsheets/…" aria-label="Roster link">
+      <p class="hint">Roster in Excel? <button type="button" class="text-link" id="rosterFileBtn">Choose the Excel or CSV file</button> from Files instead. Choose it again when the roster changes.</p>
+      <input type="file" id="rosterFile" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
       <input id="rosterName" class="field" type="text" placeholder="Your name as it appears on the roster" aria-label="Your name on the roster" autocomplete="off">
+      <label class="opt-row"><span>Get my passages ready two weeks ahead</span><input type="checkbox" class="switch" id="rosterPrep"></label>
       <p class="hint" id="rosterStatus"></p>
 
       <h3 class="card-title">Sync and backup</h3>

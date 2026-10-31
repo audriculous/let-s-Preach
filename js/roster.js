@@ -3,6 +3,8 @@
 // and the rows with your name tell the home screen what you are preaching next.
 
 const CACHE = 'letspreach.roster';
+// A date as YYYY-MM-DD in local time (toISOString would use UTC and, in Australia, give the day before).
+export const isoDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 // Any Google Sheets link -> a CSV address.
@@ -46,6 +48,8 @@ export function parseCsv(text) {
 export function parseDate(s, now = new Date()) {
   s = String(s || '').trim().toLowerCase();
   if (!s) return null;
+  // Excel stores dates as a day count from 30 Dec 1899.
+  if (/^\d{5}(\.\d+)?$/.test(s) && +s > 30000 && +s < 80000) { const d = new Date(1899, 11, 30); d.setDate(d.getDate() + Math.floor(+s)); return d; }
   let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
   m = s.match(/(\d{1,2})[\/.-](\d{1,2})(?:[\/.-](\d{2,4}))?/);
@@ -92,7 +96,7 @@ export function readRoster(rows) {
     const passage = (r[cols.passage] || '').trim();
     if (!date || !passage) continue;
     const get = k => (cols[k] != null ? (r[cols[k]] || '').trim() : '');
-    out.push({ date: date.toISOString().slice(0, 10), preacher: get('preacher'), passage, series: get('series'), title: get('title'), service: get('service') });
+    out.push({ date: isoDay(date), preacher: get('preacher'), passage, series: get('series'), title: get('title'), service: get('service') });
   }
   out.sort((a, b) => a.date.localeCompare(b.date));
   return { rows: out, hasPreacher: cols.preacher != null };
@@ -106,12 +110,109 @@ export function mine(rows, name) {
 }
 
 export function upcoming(rows, today = new Date()) {
-  const t = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString().slice(0, 10);
+  const t = isoDay(today);
   return rows.filter(r => r.date >= t);
 }
 
 export function loadCached() {
   try { return JSON.parse(localStorage.getItem(CACHE) || 'null'); } catch { return null; }
+}
+
+function save(data) {
+  try { localStorage.setItem(CACHE, JSON.stringify(data)); } catch {}
+  return data;
+}
+
+// A roster file chosen from Files: Excel (.xlsx) or CSV. Every sheet in a workbook is
+// tried until one has Date and Passage headings.
+export async function importRosterFile(file) {
+  const name = file.name || 'roster';
+  let tables;
+  if (/\.xlsx$/i.test(name) || file.type.includes('spreadsheetml')) tables = await readXlsx(await file.arrayBuffer());
+  else if (/\.xls$/i.test(name)) throw new Error('That is an old .xls file. In Excel, save it as .xlsx or CSV and try again.');
+  else tables = [parseCsv(await file.text())];
+  let parsed = null;
+  for (const t of tables) { parsed = readRoster(t); if (!parsed.error) break; }
+  if (!parsed || parsed.error) throw new Error(parsed ? parsed.error : 'That file has no sheets.');
+  return save({ fetchedAt: Date.now(), source: 'file', fileName: name, ...parsed });
+}
+
+// ---------- a small .xlsx reader (an .xlsx is a zip of XML files) ----------
+
+async function unzip(buf) {
+  const v = new DataView(buf), bytes = new Uint8Array(buf);
+  let e = buf.byteLength - 22;
+  while (e >= 0 && v.getUint32(e, true) !== 0x06054b50) e--;
+  if (e < 0) throw new Error('That does not look like an Excel file.');
+  const count = v.getUint16(e + 10, true);
+  let p = v.getUint32(e + 16, true);
+  const files = new Map();
+  const dec = new TextDecoder();
+  for (let i = 0; i < count; i++) {
+    if (v.getUint32(p, true) !== 0x02014b50) break;
+    const method = v.getUint16(p + 10, true), size = v.getUint32(p + 20, true);
+    const nameLen = v.getUint16(p + 28, true), extraLen = v.getUint16(p + 30, true), commentLen = v.getUint16(p + 32, true);
+    const local = v.getUint32(p + 42, true);
+    const name = dec.decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    files.set(name, { method, size, local });
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return async name => {
+    const f = files.get(name);
+    if (!f) return null;
+    const start = f.local + 30 + v.getUint16(f.local + 26, true) + v.getUint16(f.local + 28, true);
+    const raw = bytes.subarray(start, start + f.size);
+    if (f.method === 0) return dec.decode(raw);
+    const out = new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return await new Response(out).text();
+  };
+}
+
+const xmlText = s => s.replace(/<[^>]+>/g, '').replace(/&(lt|gt|amp|quot|apos|#\d+|#x[\da-f]+);/gi, (_, c) => (
+  { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" }[c.toLowerCase()] ?? String.fromCodePoint(c[1].toLowerCase() === 'x' ? parseInt(c.slice(2), 16) : +c.slice(1))));
+
+async function readXlsx(buf) {
+  const read = await unzip(buf);
+  const shared = [];
+  const ss = await read('xl/sharedStrings.xml');
+  if (ss) for (const m of ss.matchAll(/<si>([\s\S]*?)<\/si>/g)) {
+    shared.push([...m[1].replace(/<rPh[\s\S]*?<\/rPh>/g, '').matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(t => xmlText(t[1])).join(''));
+  }
+  // Sheets in the order the workbook lists them.
+  const wb = (await read('xl/workbook.xml')) || '';
+  const rels = (await read('xl/_rels/workbook.xml.rels')) || '';
+  const target = {};
+  for (const m of rels.matchAll(/<Relationship\b[^>]*>/g)) {
+    const id = (m[0].match(/\bId="([^"]+)"/) || [])[1], t = (m[0].match(/\bTarget="([^"]+)"/) || [])[1];
+    if (id && t) target[id] = t.startsWith('/') ? t.slice(1) : 'xl/' + t.replace(/^\.\//, '');
+  }
+  const paths = [...wb.matchAll(/<sheet\b[^>]*>/g)].map(m => target[(m[0].match(/r:id="([^"]+)"/) || [])[1]]).filter(Boolean);
+  if (!paths.length) paths.push('xl/worksheets/sheet1.xml');
+  const tables = [];
+  for (const path of paths) {
+    const xml = await read(path);
+    if (!xml) continue;
+    const rows = [];
+    for (const rm of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+      const row = [];
+      for (const cm of rm[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+        const attrs = cm[1], body = cm[2] || '';
+        const ref = (attrs.match(/\br="([A-Z]+)\d+"/) || [])[1];
+        const col = ref ? [...ref].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1 : row.length;
+        const type = (attrs.match(/\bt="(\w+)"/) || [])[1];
+        const val = (body.match(/<v>([\s\S]*?)<\/v>/) || [])[1];
+        let text = '';
+        if (type === 's') text = shared[+val] || '';
+        else if (type === 'inlineStr') text = [...body.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(t => xmlText(t[1])).join('');
+        else if (val != null) text = xmlText(val);
+        while (row.length < col) row.push('');
+        row[col] = text.trim();
+      }
+      rows.push(row);
+    }
+    tables.push(rows);
+  }
+  return tables;
 }
 
 // Fetch the sheet: straight from Google if it allows it, otherwise through your Worker.
@@ -129,9 +230,7 @@ export async function fetchRoster(link, workerUrl) {
       if (/^\s*<!doctype html|<html/i.test(text)) throw new Error('not-public');
       const parsed = readRoster(parseCsv(text));
       if (parsed.error) throw new Error(parsed.error);
-      const data = { fetchedAt: Date.now(), ...parsed };
-      try { localStorage.setItem(CACHE, JSON.stringify(data)); } catch {}
-      return data;
+      return save({ fetchedAt: Date.now(), source: 'link', ...parsed });
     } catch (e) { last = e; if (e.message.startsWith('Could not find')) throw e; }
   }
   if (last && last.message === 'not-public') throw new Error('Google returned a sign-in page. In Sheets, use File, Share, Publish to web, CSV, and paste that link.');

@@ -150,7 +150,7 @@ function saveNow() {
 window.addEventListener('pagehide', () => saveNow());
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) saveNow().then(() => sync.syncNow()).catch(() => {});
-  else sync.syncNow().catch(() => {});
+  else { sync.syncNow().catch(() => {}); refreshRoster(false); }
 });
 
 // ---------- library ----------
@@ -324,6 +324,7 @@ $('settingsBtn').addEventListener('click', () => {
   $('proxyInput').value = settings.workerUrl;
   $('rosterInput').value = settings.rosterUrl || '';
   $('rosterName').value = settings.rosterName || '';
+  $('rosterPrep').checked = settings.rosterPrep !== false;
   rosterStatusText();
   $('syncCodeInput').value = settings.syncCode || '';
   $('syncOn').checked = settings.syncOn !== false;
@@ -338,8 +339,11 @@ $('settingsDialog').addEventListener('close', () => {
   const rosterChanged = (settings.rosterUrl || '') !== $('rosterInput').value.trim() || (settings.rosterName || '') !== $('rosterName').value.trim();
   settings.rosterUrl = $('rosterInput').value.trim();
   settings.rosterName = $('rosterName').value.trim();
+  settings.rosterPrep = $('rosterPrep').checked;
   saveSettings();
-  if (rosterChanged) refreshRoster(true);
+  localStorage.removeItem('letspreach.prepTried'); // settings changed: retry any passage that failed
+  if (rosterChanged && settings.rosterUrl) refreshRoster(true);
+  else { renderNextUp(); prepAhead(); }
   settings.syncCode = $('syncCodeInput').value.trim();
   settings.syncOn = $('syncOn').checked;
   saveSettings();
@@ -1145,11 +1149,25 @@ $('preachStudyBtn').addEventListener('click', async () => {
 const normRef = r => String(r || '').toLowerCase().replace(/\s+/g, '').replace(/[–—]/g, '-');
 const niceDate = d => new Date(d + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 
-function myUpcoming() {
+function rosterData() {
   const data = roster.loadCached();
-  if (!data || !settings.rosterUrl) return [];
+  if (!data) return null;
+  // A file-based roster stays until a link replaces it; a link-based one needs the link.
+  if (data.source === 'file' ? settings.rosterUrl : !settings.rosterUrl) return null;
+  return data;
+}
+
+function myUpcoming() {
+  const data = rosterData();
+  if (!data) return [];
   const rows = data.hasPreacher ? roster.mine(data.rows, settings.rosterName) : data.rows;
   return roster.upcoming(rows);
+}
+
+async function studyFor(r, all) {
+  all = all || await db.allStudies();
+  return all.find(s => s.rosterDate === r.date && normRef(s.rosterPassage) === normRef(r.passage)) ||
+    all.find(s => s.passage && normRef(s.passage.reference) === normRef(r.passage));
 }
 
 async function renderNextUp() {
@@ -1162,14 +1180,20 @@ async function renderNextUp() {
   $('nextWhen').textContent = `Next up · ${when} · ${niceDate(next.date)}`;
   $('nextPassage').textContent = next.passage;
   $('nextMeta').textContent = [next.title, next.series, next.service].filter(Boolean).join(' · ') || ' ';
-  const existing = (await db.allStudies()).find(s => s.rosterDate === next.date && normRef(s.rosterPassage) === normRef(next.passage)) ||
-    (await db.allStudies()).find(s => normRef(s.passage.reference) === normRef(next.passage));
-  $('nextOpen').querySelector('span').textContent = existing ? 'Continue study' : 'Open passage';
+  const all = await db.allStudies();
+  const existing = await studyFor(next, all);
+  const fresh = existing && existing.prepped && existing.modified === existing.created;
+  $('nextOpen').querySelector('span').textContent = existing ? (fresh ? 'Start study' : 'Continue study') : 'Open passage';
+  $('nextReady').hidden = !fresh;
   $('nextOpen').onclick = () => existing ? openStudy(existing.id) : openRosterPassage(next);
-  $('nextLater').innerHTML = up.slice(1, 4).map(r => `<li><span>${esc(niceDate(r.date))}</span><b>${esc(r.passage)}</b>${r.series ? `<em>${esc(r.series)}</em>` : ''}</li>`).join('');
-  const data = roster.loadCached();
-  $('rosterAge').textContent = data ? 'Roster checked ' + timeAgo(data.fetchedAt) : '';
+  const later = up.slice(1, 4);
+  const ready = await Promise.all(later.map(r => studyFor(r, all)));
+  $('nextLater').innerHTML = later.map((r, i) => `<li${ready[i] ? ' class="ready"' : ''}><span>${esc(niceDate(r.date))}</span><b>${esc(r.passage)}</b>${r.series ? `<em>${esc(r.series)}</em>` : ''}</li>`).join('');
+  const data = rosterData();
+  $('rosterAge').textContent = data ? (data.source === 'file' ? `From ${data.fileName}, ` : 'Roster checked ') + timeAgo(data.fetchedAt) : '';
 }
+
+const rosterExtra = r => ({ title: r.title || r.passage, series: r.series || '', preached: r.date, rosterDate: r.date, rosterPassage: r.passage });
 
 async function openRosterPassage(r) {
   const btn = $('nextOpen');
@@ -1177,9 +1201,7 @@ async function openRosterPassage(r) {
   btn.querySelector('span').textContent = `Getting ${r.passage}…`;
   try {
     const passage = await fetchPassage(r.passage, $('versionSelect').value || 'NIV', settings.workerUrl);
-    await createAndOpen(passage, {
-      title: r.title || passage.reference, series: r.series || '', preached: r.date, rosterDate: r.date, rosterPassage: r.passage,
-    });
+    await createAndOpen(passage, { ...rosterExtra(r), title: r.title || passage.reference });
   } catch (err) {
     toast(err.message);
   } finally {
@@ -1188,30 +1210,95 @@ async function openRosterPassage(r) {
   }
 }
 
-async function refreshRoster(force) {
-  if (!settings.rosterUrl) { renderNextUp(); return; }
-  const data = roster.loadCached();
-  if (!force && data && Date.now() - data.fetchedAt < 60 * 60 * 1000) return;
+// Each week as a date comes within two weeks, fetch the passage and set the study up
+// (title, series, date), so it is waiting in the library and works offline.
+const PREP_DAYS = 14;
+let prepping = false;
+async function prepAhead() {
+  if (prepping || settings.rosterPrep === false || !navigator.onLine) return;
+  prepping = true;
+  const made = [];
   try {
-    await roster.fetchRoster(settings.rosterUrl, settings.workerUrl);
-    if (force) {
-      const n = myUpcoming().length;
-      toast(n ? `Roster updated: ${n} upcoming for you` : 'Roster read, but nothing upcoming with your name');
+    const soon = myUpcoming().filter(r => (new Date(r.date + 'T12:00') - new Date()) / 864e5 <= PREP_DAYS);
+    const all = await db.allStudies();
+    const tried = JSON.parse(localStorage.getItem('letspreach.prepTried') || '{}');
+    for (const r of soon) {
+      const key = r.date + '|' + normRef(r.passage);
+      if (await studyFor(r, all)) continue;
+      if (tried[key] && Date.now() - tried[key] < 6 * 3600e3) continue; // a failed fetch: try again later
+      try {
+        const passage = await fetchPassage(r.passage, settings.prepVersion || 'NIV', settings.workerUrl);
+        const s = Object.assign(newStudy(passage), rosterExtra(r), { prepped: true });
+        s.title = r.title || passage.reference;
+        s.modified = s.created;
+        await db.putStudy(s);
+        all.push(s);
+        made.push(r);
+        delete tried[key];
+      } catch {
+        tried[key] = Date.now();
+      }
     }
-  } catch (err) {
-    if (force) toast(err.message);
+    localStorage.setItem('letspreach.prepTried', JSON.stringify(tried));
+  } finally {
+    prepping = false;
+  }
+  if (made.length) {
+    toast(made.length === 1 ? `${made[0].passage} is ready for ${niceDate(made[0].date)}` : `${made.length} upcoming passages are ready`);
+    sync.schedule();
+    if (!study) showLibrary();
+  }
+}
+
+async function refreshRoster(force) {
+  const data = roster.loadCached();
+  if (!settings.rosterUrl) {
+    if (force && data && data.source === 'file') toast(`Choose ${data.fileName} again in Settings to pick up changes`);
+    renderNextUp(); prepAhead(); return;
+  }
+  if (force || !data || data.source !== 'link' || Date.now() - data.fetchedAt >= 60 * 60 * 1000) {
+    try {
+      await roster.fetchRoster(settings.rosterUrl, settings.workerUrl);
+      if (force) {
+        const n = myUpcoming().length;
+        toast(n ? `Roster updated: ${n} upcoming for you` : 'Roster read, but nothing upcoming with your name');
+      }
+    } catch (err) {
+      if (force) toast(err.message);
+    }
   }
   if (!study) renderNextUp();
+  prepAhead();
 }
 
 function rosterStatusText() {
   const el = $('rosterStatus');
   const data = roster.loadCached();
-  if (!settings.rosterUrl) { el.textContent = ''; return; }
-  if (!data) { el.textContent = 'Not read yet.'; return; }
-  const mineRows = data.hasPreacher ? roster.mine(data.rows, settings.rosterName) : data.rows;
-  el.textContent = `${data.rows.length} rows read ${timeAgo(data.fetchedAt)}. ${data.hasPreacher ? `${mineRows.length} with ${settings.rosterName ? '"' + settings.rosterName + '"' : 'your name (add it above)'}.` : 'No preacher column, so every row is yours.'} ${roster.upcoming(mineRows).length} upcoming.`;
+  const url = $('rosterInput').value.trim();
+  if (!data || (data.source === 'file' ? url : !url)) { el.textContent = url ? 'Not read yet.' : ''; return; }
+  const name = $('rosterName').value.trim();
+  const mineRows = data.hasPreacher ? roster.mine(data.rows, name) : data.rows;
+  el.textContent = `${data.source === 'file' ? `From ${data.fileName}: ` : ''}${data.rows.length} rows read ${timeAgo(data.fetchedAt)}. ${data.hasPreacher ? `${mineRows.length} with ${name ? '"' + name + '"' : 'your name (add it above)'}.` : 'No preacher column, so every row is yours.'} ${roster.upcoming(mineRows).length} upcoming.`;
 }
+
+$('rosterFileBtn').addEventListener('click', () => $('rosterFile').click());
+$('rosterFile').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    await roster.importRosterFile(file);
+    $('rosterInput').value = '';
+    settings.rosterUrl = '';
+    saveSettings();
+    rosterStatusText();
+    toast('Roster read from ' + file.name + '. Tap Save to finish.');
+    renderNextUp();
+  } catch (err) {
+    toast(err.message);
+  }
+});
+$('rosterName').addEventListener('input', rosterStatusText);
 
 $('rosterRefresh').addEventListener('click', () => refreshRoster(true));
 
