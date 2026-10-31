@@ -53,7 +53,7 @@ export class Marks {
         if (!rect || !rect.width) continue;
         const lower = word.toLowerCase().replace(/’/g, "'");
         out.push({
-          text: word, lower, norm: normWord(word),
+          text: word, lower, norm: normWord(word), node,
           x: (rect.left - g.r.left) / g.scale, y: (rect.top - g.r.top) / g.scale,
           w: rect.width / g.scale, h: rect.height / g.scale,
         });

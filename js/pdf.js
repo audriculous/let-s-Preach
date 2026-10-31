@@ -8,7 +8,7 @@
 import { drawStroke, PAGE_W } from './ink.js';
 import { PAD_W } from './pad.js';
 import { LABEL_FONT } from './marks.js';
-import { PROMPTS } from './sheet.js';
+import { PROMPTS, gridAnswers } from './sheet.js';
 
 const PAGE_H = Math.round(PAGE_W * 297 / 210); // A4 in logical px
 const RES = 2;                                  // canvas px per logical px
@@ -237,7 +237,7 @@ function layoutOutline(study) {
   if (!o) return [];
   const inked = k => o.pads && o.pads[k] && o.pads[k].strokes.length ? o.pads[k] : null;
   const ccDone = PROMPTS.some(pr => o.cc && o.cc[pr.key] && (o.cc[pr.key].text || (o.cc[pr.key].pad && o.cc[pr.key].pad.strokes.length)));
-  const hasContent = ccDone || o.bigIdea || o.application || o.illustrations || inked('application') || inked('illustrations') ||
+  const hasContent = ccDone || gridAnswers(o).length || (o.words || []).length || o.bigIdea || o.application || o.illustrations || inked('application') || inked('illustrations') ||
     (o.points || []).some(p => p.title || p.notes || p.verses || (p.subs || []).some(Boolean));
   if (!hasContent) return [];
   const blocks = [];
@@ -268,7 +268,20 @@ function layoutOutline(study) {
     if (pad) blocks.push({ pad, gap: 8, indent: 0 });
   };
   section('Application', 'application', 34);
+  gridAnswers(o).forEach((g, i) => {
+    add(T.eyebrow, 'Application: ' + g.tag, i ? 22 : 30);
+    add(T.body, g.text, 4);
+    if (g.pad && g.pad.strokes.length) blocks.push({ pad: g.pad, gap: 6, indent: 0 });
+  });
   section('Illustrations', 'illustrations', 30);
+  if ((o.words || []).length) {
+    add(T.eyebrow, 'Word studies', 30);
+    for (const w of o.words) {
+      add(T.body, `${w.lemma} (${w.tr}), ${w.gloss}`, 8);
+      add(T.muted, [`“${w.english}” in ${w.ref}`, w.here].filter(Boolean).join(' · '), 0, 34);
+      add(T.body, w.note, 2, 34);
+    }
+  }
 
   // Wrap into lines, then into pages.
   const ctx = document.createElement('canvas').getContext('2d');

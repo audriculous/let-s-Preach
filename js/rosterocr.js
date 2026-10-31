@@ -4,6 +4,7 @@
 // pulled out. Nothing is saved until you have checked the rows.
 
 import { parseDate, isoDay } from './roster.js';
+import { BOOKS } from './verses.js';
 
 let workerPromise = null;
 function ocr(onProgress) {
@@ -22,20 +23,6 @@ let progressFn = null;
 
 // ---------- Bible references ----------
 
-const BOOKS = [
-  'Genesis|Gen|Ge|Gn', 'Exodus|Exod|Exo|Ex', 'Leviticus|Lev|Lv', 'Numbers|Num|Nu|Nm', 'Deuteronomy|Deut|Dt',
-  'Joshua|Josh|Jos', 'Judges|Judg|Jdg', 'Ruth|Ru', '1 Samuel|1 Sam|1 Sa', '2 Samuel|2 Sam|2 Sa', '1 Kings|1 Kgs|1 Ki',
-  '2 Kings|2 Kgs|2 Ki', '1 Chronicles|1 Chron|1 Chr', '2 Chronicles|2 Chron|2 Chr', 'Ezra|Ezr', 'Nehemiah|Neh',
-  'Esther|Esth|Est', 'Job', 'Psalms|Psalm|Pss|Ps', 'Proverbs|Prov|Pr', 'Ecclesiastes|Eccles|Eccl|Ecc',
-  'Song of Songs|Song of Solomon|Song', 'Isaiah|Isa|Is', 'Jeremiah|Jer', 'Lamentations|Lam', 'Ezekiel|Ezek|Eze',
-  'Daniel|Dan|Dn', 'Hosea|Hos', 'Joel', 'Amos', 'Obadiah|Obad|Ob', 'Jonah|Jon', 'Micah|Mic', 'Nahum|Nah',
-  'Habakkuk|Hab', 'Zephaniah|Zeph', 'Haggai|Hag', 'Zechariah|Zech', 'Malachi|Mal',
-  'Matthew|Matt|Mt', 'Mark|Mk', 'Luke|Lk', 'John|Jn', 'Acts', 'Romans|Rom', '1 Corinthians|1 Cor', '2 Corinthians|2 Cor',
-  'Galatians|Gal', 'Ephesians|Eph', 'Philippians|Phil', 'Colossians|Col', '1 Thessalonians|1 Thess|1 Th',
-  '2 Thessalonians|2 Thess|2 Th', '1 Timothy|1 Tim', '2 Timothy|2 Tim', 'Titus|Tit', 'Philemon|Phlm|Philem',
-  'Hebrews|Heb', 'James|Jas', '1 Peter|1 Pet|1 Pe', '2 Peter|2 Pet|2 Pe', '1 John|1 Jn', '2 John|2 Jn', '3 John|3 Jn',
-  'Jude', 'Revelation|Rev',
-];
 // "1 Cor", "1Cor", "I Cor" and "First Cor" are all the same book.
 const bookPat = BOOKS.map(b => b.split('|').map(n => n.replace(/^([123]) /, (_, d) => `(?:${d}|${'I'.repeat(+d)}|${['First', 'Second', 'Third'][d - 1]})\\s*`)).join('|')).join('|');
 const NUM = '\\d{1,3}(?:\\s*[:.]\\s*\\d{1,3}[a-c]?)?';

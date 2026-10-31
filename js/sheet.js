@@ -5,7 +5,7 @@
 import { walkVerses, passageContainer, suggestBreakup, rangeLabel, openingWords, pointStarts, diffWords, esc, seams, breakupOptions, sectionsFromCuts } from './verses.js';
 import { SECTION_COLORS } from './marks.js';
 import { Pad, emptyPad } from './pad.js';
-import { scanSensitive, CHECKLIST } from './checks.js';
+import { scanSensitive, CHECKLIST, logicChecks } from './checks.js';
 
 export const VERSIONS = ['NIV', 'ESV', 'NASB', 'NASB1995', 'CSB', 'NKJV', 'KJV', 'NLT', 'NRSVUE'];
 
@@ -18,6 +18,28 @@ export const PROMPTS = [
   { key: 'response', tag: 'Response', q: 'What response of faith does it call for?', hint: 'Not just \u201Ctry harder\u201D: what does grace make possible, and why would we want it?' },
 ];
 
+// The application grid: areas of life for a young-adult congregation. Pick two or
+// three; specific beats general.
+export const GRID = [
+  { key: 'heart', tag: 'Heart', q: 'What should they believe, love, fear or hope differently?', hint: 'Under the behaviour: desires, fears, guilt, pride.' },
+  { key: 'work', tag: 'Uni and work', q: 'Where does this meet study, work and ambition?', hint: 'Deadlines, bosses, career choices, the casual job, being known as a Christian there.' },
+  { key: 'love', tag: 'Dating, singleness, marriage', q: 'What does it say to the single, the dating and the married?', hint: 'Speak to all three, not just one as the normal case.' },
+  { key: 'home', tag: 'Family and home', q: 'How does it play out with parents, siblings and housemates?', hint: 'Leaving home, honouring parents, sharing a house.' },
+  { key: 'online', tag: 'Friends and online', q: 'What changes in friendships, group chats and on their phone?', hint: 'Comparison, outrage, image, what they watch and scroll.' },
+  { key: 'money', tag: 'Money and time', q: 'What does it mean for spending, rent, saving and weekends?', hint: 'Generosity, contentment, busyness, rest.' },
+  { key: 'church', tag: 'Church family', q: 'How should it shape the way they belong, serve and love the church?', hint: 'Growth groups, serving, the people who are hard to love.' },
+  { key: 'outsider', tag: 'The friend who doesn\u2019t believe', q: 'How would this land with a non-Christian friend? What would they push back on?', hint: 'Answer the objection, and give believers words to share it.' },
+  { key: 'hurting', tag: 'The one who is hurting', q: 'What comfort or hope does it give someone grieving, anxious, doubting or ashamed?', hint: 'Say it gently. Avoid quick fixes for real pain.' },
+];
+
+// Grid answers that have something in them, in grid order: [{ key, tag, text, pad }].
+export function gridAnswers(o) {
+  const g = o.grid || {};
+  return GRID.filter(a => (g.on || []).includes(a.key) && g.a && g.a[a.key])
+    .map(a => ({ key: a.key, tag: a.tag, q: a.q, text: g.a[a.key].text || '', pad: g.a[a.key].pad }))
+    .filter(a => a.text.trim() || (a.pad && a.pad.strokes.length));
+}
+
 export function emptyOutline() {
   return { bigIdea: '', points: [], application: '', illustrations: '', pads: {}, checks: {}, showOnPage: true };
 }
@@ -25,7 +47,7 @@ export function emptyOutline() {
 const $ = id => document.getElementById(id);
 const pid = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
-export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toast, pushAction, setSplitMode, isSplitMode, pen, fingerDraw, renderRefs }) {
+export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toast, pushAction, setSplitMode, isSplitMode, pen, fingerDraw, renderRefs, renderPlan }) {
   const sheet = $('sheet');
   let tab = 'outline';
   let verses = [];
@@ -53,8 +75,9 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     $('outlinePane').hidden = tab !== 'outline';
     $('comparePane').hidden = tab !== 'compare';
     $('refsPane').hidden = tab !== 'refs';
+    $('planPane').hidden = tab !== 'plan';
     verses = walkVerses(passageContainer(study().passage), study().passage.reference);
-    if (tab === 'outline') renderOutline(); else if (tab === 'compare') renderCompare(); else renderRefs();
+    if (tab === 'outline') renderOutline(); else if (tab === 'compare') renderCompare(); else if (tab === 'plan') renderPlan(); else renderRefs();
   }
 
   $('sheetClose').addEventListener('click', close);
@@ -101,11 +124,21 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       <p class="hint">Write with the Pencil. What does this mean on Monday for the young adults in the room?</p>
       ${o.application ? '<textarea class="field sheet-field" data-f="application" rows="2"></textarea>' : ''}
       <div id="padApplication"></div>
+      <div class="sheet-row">
+        <p class="eyebrow sub">Application grid</p>
+        <button type="button" class="text-link" id="gridToggle"></button>
+      </div>
+      <div id="grid"></div>
 
       <p class="eyebrow">Illustrations</p>
       <p class="hint">Write with the Pencil. Stories, pictures, quotes.</p>
       ${o.illustrations ? '<textarea class="field sheet-field" data-f="illustrations" rows="2"></textarea>' : ''}
       <div id="padIllustrations"></div>
+
+      <div id="wordsBox"></div>
+
+      <p class="eyebrow">Tighten the logic</p>
+      <div id="logic"></div>
 
       <p class="eyebrow">Before you preach</p>
       <div id="sensitivity"></div>
@@ -122,11 +155,14 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     o.pads = o.pads || {};
     for (const [key, id] of [['application', 'padApplication'], ['illustrations', 'padIllustrations']]) {
       o.pads[key] = o.pads[key] || emptyPad();
-      const pad = new Pad($(id), o.pads[key], { onChange: save, pushAction, pen, fingerDraw });
+      const pad = new Pad($(id), o.pads[key], { onChange: () => { save(); rescan(); }, pushAction, pen, fingerDraw });
       requestAnimationFrame(() => pad.render());
     }
     keyboardOnPencil(pane.querySelector('[data-f=bigIdea]'));
     renderPrompts();
+    renderGrid();
+    renderWords();
+    $('gridToggle').addEventListener('click', () => { o.grid = o.grid || {}; o.grid.hidden = !o.grid.hidden; save(); renderGrid(); });
     $('ccToggle').addEventListener('click', () => { o.ccHidden = !o.ccHidden; save(); renderPrompts(); });
     $('showBreakup').checked = o.showOnPage !== false;
     $('showBreakup').addEventListener('change', e => { o.showOnPage = e.target.checked; save(); marks.render(); });
@@ -198,7 +234,7 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       title.addEventListener('input', () => { p.title = title.value; save(); rescan(); remark(); });
       notes.addEventListener('input', () => { p.notes = notes.value; autoGrow(notes); save(); rescan(); });
       vv.addEventListener('input', () => {
-        p.verses = vv.value; save();
+        p.verses = vv.value; save(); rescan();
         showStart(pointStarts(o.points, verses)[i]);
         remark();
         renderStrip();
@@ -226,29 +262,114 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     if (o.ccHidden) return;
     for (const pr of PROMPTS) {
       const a = o.cc[pr.key] = o.cc[pr.key] || { text: '', mode: 'write', pad: emptyPad(130) };
-      const div = document.createElement('div');
-      div.className = 'cc';
-      div.innerHTML = `<div class="cc-head"><span class="cc-tag">${pr.tag}</span><span class="cc-q">${esc(pr.q)}</span></div>
-        <p class="cc-hint">${esc(pr.hint)}</p><div class="cc-body"></div>
-        <button type="button" class="text-link cc-mode">${a.mode === 'type' ? 'Write with the Pencil instead' : 'Type instead'}</button>`;
-      const body = div.querySelector('.cc-body');
-      if (a.mode === 'type') {
-        const t = document.createElement('textarea');
-        t.className = 'field sheet-field';
-        t.rows = 2;
-        t.value = a.text;
-        t.addEventListener('input', () => { a.text = t.value; autoGrow(t); save(); rescan(); });
-        body.appendChild(t);
-        keyboardOnPencil(t);
-        requestAnimationFrame(() => autoGrow(t));
-      } else {
-        if (a.text) { const p = document.createElement('p'); p.className = 'cc-typed'; p.textContent = a.text; body.appendChild(p); }
-        const pad = new Pad(body, a.pad, { onChange: save, pushAction, pen, fingerDraw });
-        requestAnimationFrame(() => pad.render());
-      }
-      div.querySelector('.cc-mode').addEventListener('click', () => { a.mode = a.mode === 'type' ? 'write' : 'type'; save(); renderPrompts(); });
-      box.appendChild(div);
+      box.appendChild(answerCard(pr, a, renderPrompts));
     }
+  }
+
+  // One prompt with its answer: handwritten on a pad, or typed.
+  function answerCard(pr, a, rerender, extra = '') {
+    const div = document.createElement('div');
+    div.className = 'cc';
+    div.innerHTML = `<div class="cc-head"><span class="cc-tag">${esc(pr.tag)}</span><span class="cc-q">${esc(pr.q)}</span>${extra}</div>
+      <p class="cc-hint">${esc(pr.hint)}</p><div class="cc-body"></div>
+      <button type="button" class="text-link cc-mode">${a.mode === 'type' ? 'Write with the Pencil instead' : 'Type instead'}</button>`;
+    const body = div.querySelector('.cc-body');
+    if (a.mode === 'type') {
+      const t = document.createElement('textarea');
+      t.className = 'field sheet-field';
+      t.rows = 2;
+      t.value = a.text;
+      t.addEventListener('input', () => { a.text = t.value; autoGrow(t); save(); rescan(); });
+      body.appendChild(t);
+      keyboardOnPencil(t);
+      requestAnimationFrame(() => autoGrow(t));
+    } else {
+      if (a.text) { const p = document.createElement('p'); p.className = 'cc-typed'; p.textContent = a.text; body.appendChild(p); }
+      const pad = new Pad(body, a.pad, { onChange: () => { save(); rescan(); }, pushAction, pen, fingerDraw });
+      requestAnimationFrame(() => pad.render());
+    }
+    div.querySelector('.cc-mode').addEventListener('click', () => { a.mode = a.mode === 'type' ? 'write' : 'type'; save(); rerender(); });
+    return div;
+  }
+
+  // The application grid: tap areas of life to open them, then write or type.
+  function renderGrid() {
+    const o = outline(), box = $('grid');
+    if (!box) return;
+    const g = o.grid = o.grid || {};
+    g.on = g.on || []; g.a = g.a || {};
+    $('gridToggle').textContent = g.hidden ? 'Show' : 'Hide';
+    box.hidden = !!g.hidden;
+    box.innerHTML = '';
+    if (g.hidden) return;
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'Pick two or three areas of life where this passage bites. Specific beats general.';
+    box.appendChild(hint);
+    const chips = document.createElement('div');
+    chips.className = 'grid-chips';
+    for (const area of GRID) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'grid-chip' + (g.on.includes(area.key) ? ' on' : '');
+      b.textContent = area.tag;
+      b.setAttribute('aria-pressed', g.on.includes(area.key));
+      b.addEventListener('click', () => {
+        if (g.on.includes(area.key)) g.on = g.on.filter(k => k !== area.key); // what was written stays, ready if it is opened again
+        else g.on = GRID.map(x => x.key).filter(k => k === area.key || g.on.includes(k));
+        save(); renderGrid(); rescan();
+      });
+      chips.appendChild(b);
+    }
+    box.appendChild(chips);
+    for (const area of GRID) {
+      if (!g.on.includes(area.key)) continue;
+      const a = g.a[area.key] = g.a[area.key] || { text: '', mode: 'write', pad: emptyPad(130) };
+      box.appendChild(answerCard(area, a, renderGrid));
+    }
+    if (g.on.length > 4) {
+      const p = document.createElement('p');
+      p.className = 'hint';
+      p.textContent = `${g.on.length} areas open. A sermon usually lands better hitting two or three hard than everything lightly.`;
+      box.appendChild(p);
+    }
+  }
+
+  // Words kept from word study.
+  function renderWords() {
+    const o = outline(), box = $('wordsBox');
+    if (!box) return;
+    const list = o.words || [];
+    if (!list.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<p class="eyebrow">Word studies</p><ul class="word-list"></ul>';
+    const ul = box.querySelector('ul');
+    list.forEach((w, i) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<div><span class="wl-orig"></span> <span class="wl-tr"></span> <b class="wl-gloss"></b></div><div class="wl-meta"></div>
+        <textarea class="point-notes" rows="1" placeholder="What it adds to the sermon"></textarea><button type="button" class="point-del" aria-label="Remove">×</button>`;
+      li.querySelector('.wl-orig').textContent = w.lemma;
+      li.querySelector('.wl-tr').textContent = w.tr;
+      li.querySelector('.wl-gloss').textContent = w.gloss;
+      li.querySelector('.wl-meta').textContent = [`“${w.english}” in ${w.ref}`, w.here].filter(Boolean).join(' · ');
+      const t = li.querySelector('textarea');
+      t.value = w.note || '';
+      keyboardOnPencil(t);
+      requestAnimationFrame(() => autoGrow(t));
+      t.addEventListener('input', () => { w.note = t.value; autoGrow(t); save(); });
+      li.querySelector('.point-del').addEventListener('click', () => { o.words.splice(i, 1); save(); renderWords(); });
+      ul.appendChild(li);
+    });
+  }
+
+  function renderLogic() {
+    const box = $('logic');
+    if (!box) return;
+    const o = outline();
+    const results = logicChecks({ outline: o, starts: pointStarts(o.points, verses), verseCount: verses.length, grid: gridAnswers(o) });
+    const good = results.filter(r => r.ok), look = results.filter(r => !r.ok);
+    box.innerHTML = `<p class="hint">${look.length ? `${good.length} of ${results.length} look good. Worth a look:` : 'Everything checks out. Read it aloud once to be sure it flows.'}</p>` +
+      look.map(r => `<div class="logic-card"><b>${esc(r.label)}</b> ${esc(r.note)}</div>`).join('') +
+      (good.length ? `<p class="logic-ok">${good.map(r => `<span title="${esc(r.note)}">✓ ${esc(r.label)}</span>`).join('')}</p>` : '');
   }
 
   // Sub-points: one line each. Return adds the next one, Backspace on an empty one removes it.
@@ -430,6 +551,7 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
   }
 
   function renderChecks() {
+    renderLogic();
     const box = $('sensitivity');
     if (!box) return;
     const s = study(), o = s.outline;
@@ -439,6 +561,7 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       ...o.points.flatMap((p, i) => [{ where: `Point ${i + 1}`, text: [p.title, ...(p.subs || []), p.notes].join('\n') }]),
       { where: 'Application', text: o.application },
       { where: 'Illustrations', text: o.illustrations },
+      ...gridAnswers(o).map(a => ({ where: a.tag, text: a.text })),
       ...(s.notes || []).map(n => ({ where: 'Text box', text: n.text })),
     ];
     const found = scanSensitive(sources);
@@ -468,7 +591,18 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     });
     const inked = k => o.pads && o.pads[k] && o.pads[k].strokes.length;
     if (o.application || inked('application')) lines.push('APPLICATION', o.application || '(handwritten, see the PDF)', '');
+    const grid = gridAnswers(o);
+    if (grid.length) {
+      lines.push('APPLICATION GRID');
+      for (const a of grid) lines.push(`${a.tag}: ${a.text || '(handwritten, see the PDF)'}`);
+      lines.push('');
+    }
     if (o.illustrations || inked('illustrations')) lines.push('ILLUSTRATIONS', o.illustrations || '(handwritten, see the PDF)', '');
+    if ((o.words || []).length) {
+      lines.push('WORD STUDIES');
+      for (const w of o.words) lines.push(`${w.lemma} (${w.tr}), ${w.gloss}: “${w.english}” in ${w.ref}${w.note ? '. ' + w.note : ''}`);
+      lines.push('');
+    }
     return lines.join('\n').trim() + '\n';
   }
 
@@ -569,7 +703,9 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     open, close, render,
     toggle(which) { if (!sheet.hidden && (!which || which === tab)) close(); else open(which); },
     get isOpen() { return !sheet.hidden; },
+    get tab() { return tab; },
     rescan,
+    renderWords,
     splitAtKey,
     syncSplitButton,
   };

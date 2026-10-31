@@ -10,6 +10,8 @@ import { initRefs } from './refs.js';
 import { initPreach, addDeck } from './preach.js';
 import * as roster from './roster.js';
 import { walkVerses } from './verses.js';
+import { initWordStudy } from './wordstudy.js';
+import * as plan from './plan.js';
 
 const $ = id => document.getElementById(id);
 
@@ -89,6 +91,12 @@ const refs = initRefs({
 });
 const sheet = initSheet({
   renderRefs: () => refs.renderTab(),
+  renderPlan: () => plan.renderPlanPane($('planPane'), {
+    study, settings, toast,
+    save: () => scheduleSave(),
+    saveSettings,
+    onChange: () => sheet.render(),
+  }),
   getStudy: () => study,
   save: () => scheduleSave(),
   marks,
@@ -100,6 +108,12 @@ const sheet = initSheet({
   isSplitMode: () => ink.tool === 'split',
   pen: () => ({ color: prefs.color.pen, size: SIZES.pen[prefs.size.pen] ?? SIZES.pen[2], smoothing: prefs.smoothing }),
   fingerDraw: () => prefs.fingerDraw,
+});
+const wordStudy = initWordStudy({
+  getStudy: () => study,
+  save: () => scheduleSave(),
+  toast,
+  onKeep: () => sheet.render(),
 });
 const sync = initSync({
   settings, saveSettings,
@@ -187,6 +201,7 @@ function matches(s, q) {
 
 async function renderLibrary() {
   renderNextUp();
+  renderPlanCard();
   renderDecks();
   const all = (await db.allStudies()).sort((a, b) => b.updated - a.updated);
   const q = $('searchInput').value.trim().toLowerCase();
@@ -325,6 +340,9 @@ $('settingsBtn').addEventListener('click', () => {
   $('rosterInput').value = settings.rosterUrl || '';
   $('rosterName').value = settings.rosterName || '';
   $('rosterPrep').checked = settings.rosterPrep !== false;
+  $('planOn').checked = settings.planOn !== false;
+  $('planTemplate')._steps = null;
+  plan.renderTemplateEditor($('planTemplate'), { settings });
   rosterStatusText();
   $('syncCodeInput').value = settings.syncCode || '';
   $('syncOn').checked = settings.syncOn !== false;
@@ -340,8 +358,11 @@ $('settingsDialog').addEventListener('close', () => {
   settings.rosterUrl = $('rosterInput').value.trim();
   settings.rosterName = $('rosterName').value.trim();
   settings.rosterPrep = $('rosterPrep').checked;
+  settings.planOn = $('planOn').checked;
+  settings.planSteps = plan.readTemplateEditor($('planTemplate'));
   saveSettings();
   localStorage.removeItem('letspreach.prepTried'); // settings changed: retry any passage that failed
+  renderPlanCard();
   if (rosterChanged && settings.rosterUrl) refreshRoster(true);
   else { renderNextUp(); prepAhead(); }
   settings.syncCode = $('syncCodeInput').value.trim();
@@ -486,6 +507,8 @@ async function openStudy(id) {
   scroller.scrollTop = 0;
   relayout();
   marks.setStudy(study);
+  // After word study has been used once, keep the book's Greek or Hebrew ready offline.
+  if (prefs.wordStudyUsed) { const ref = study.passage.reference; setTimeout(() => wordStudy.warm(ref), 5000); }
   setTool(prefs.tool);
   sheet.render();
 }
@@ -727,6 +750,13 @@ function spotWordAt(x, y) {
   }
   const w = marks.wordAt(x, y);
   if (!w) return;
+  if (prefs.spotMode === 'study') {
+    const r = page.getBoundingClientRect(), k = r.width / PAGE_W;
+    const anchor = { left: r.left + w.x * k, top: r.top + w.y * k, right: r.left + (w.x + w.w) * k, bottom: r.top + (w.y + w.h) * k };
+    if (!prefs.wordStudyUsed) { prefs.wordStudyUsed = true; savePrefs(); }
+    wordStudy.open({ word: w, node: w.node, all: marks.words() }, anchor, passageEl);
+    return;
+  }
   toggleSpot(w.norm, w.lower === 'god' || w.lower === 'lord' ? w.text : w.lower);
 }
 
@@ -770,6 +800,17 @@ function renderSpotBar() {
   }
   $('spotClear').hidden = !(study.spots.length || study.connectives);
 }
+function syncSpotMode() {
+  const mode = prefs.spotMode === 'study' ? 'study' : 'repeat';
+  document.querySelectorAll('#spotMode button').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+  $('spotBar').classList.toggle('study-mode', mode === 'study');
+  $('spotHint').textContent = mode === 'study' ? 'Tap a word to see the Greek or Hebrew behind it' : 'Tap a word to box every repeat';
+}
+document.querySelectorAll('#spotMode button').forEach(b => b.addEventListener('click', () => {
+  prefs.spotMode = b.dataset.mode; savePrefs(); syncSpotMode();
+  if (prefs.spotMode === 'study') toast('Tap any word in the passage');
+}));
+syncSpotMode();
 $('connBtn').addEventListener('click', () => setSpots(study.spots.slice(), !study.connectives));
 $('spotClear').addEventListener('click', () => setSpots([], false));
 
@@ -945,7 +986,7 @@ $('tagsInput').addEventListener('input', e => {
   study.tags = [...new Set(e.target.value.split(',').map(t => t.trim().replace(/^#/, '')).filter(Boolean))];
   scheduleSave();
 });
-$('preachedInput').addEventListener('change', e => { study.preached = e.target.value || ''; scheduleSave(); });
+$('preachedInput').addEventListener('change', e => { study.preached = e.target.value || ''; scheduleSave(); if (sheet.tab === 'plan') sheet.render(); });
 
 document.querySelectorAll('[data-font]').forEach(b => b.addEventListener('click', () => {
   const f = Math.max(16, Math.min(44, study.layout.font + 2 * +b.dataset.font));
@@ -1035,6 +1076,7 @@ async function doExportPdf() {
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   $('busy').hidden = false;
   try {
+    study.rehearsed = Date.now();
     await saveNow();
     marks.render();
     const blob = await exportPdf({ page, passageEl, strokes: ink.strokes, pageH: ink.pageH, title: study.title, marks: marks.items, study });
@@ -1170,6 +1212,34 @@ async function studyFor(r, all) {
   all = all || await db.allStudies();
   return all.find(s => s.rosterDate === r.date && normRef(s.rosterPassage) === normRef(r.passage)) ||
     all.find(s => s.passage && normRef(s.passage.reference) === normRef(r.passage));
+}
+
+// This week's prep: the nearest sermon with a date in the next two weeks, with today's
+// step from its plan.
+async function renderPlanCard() {
+  const card = $('planCard');
+  if (settings.planOn === false) { card.hidden = true; return; }
+  const now = plan.today();
+  const all = await db.allStudies();
+  const soon = all.filter(s => s.preached && s.preached >= now && plan.daysBetween(now, s.preached) <= 13)
+    .sort((a, b) => a.preached.localeCompare(b.preached));
+  const s = soon[0];
+  card.hidden = !s;
+  if (!s) return;
+  const st = plan.status(s, settings, now);
+  const sum = plan.summary(st, now);
+  const days = st.daysLeft;
+  $('planWhen').textContent = `Prep plan · ${days === 0 ? 'Preaching today' : days === 1 ? 'Preaching tomorrow' : `${days} days to go`} · ${plan.shortDay(s.preached)}`;
+  $('planPassage').textContent = s.title + (s.passage && s.passage.reference && s.passage.reference !== s.title ? ` · ${s.passage.reference}` : '');
+  $('planLine').textContent = sum.text;
+  $('planLine').className = 'plan-line ' + sum.tone;
+  const steps = [...st.plan.steps].sort((a, b) => a.due.localeCompare(b.due));
+  $('planDots').innerHTML = steps.map(x => {
+    const done = plan.isDone(x, s);
+    const cls = done ? 'done' : x.due < now ? 'behind' : x.due === now ? 'today' : '';
+    return `<span class="${cls}" title="${esc(x.label)}"></span>`;
+  }).join('') + `<em>${st.done} of ${st.total}</em>`;
+  $('planOpen').onclick = async () => { await openStudy(s.id); sheet.open('plan'); };
 }
 
 async function renderNextUp() {

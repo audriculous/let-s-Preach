@@ -36,6 +36,38 @@ export function normWord(w) {
   return s;
 }
 
+// The 66 books with their usual short forms, in order.
+export const BOOKS = [
+  'Genesis|Gen|Ge|Gn', 'Exodus|Exod|Exo|Ex', 'Leviticus|Lev|Lv', 'Numbers|Num|Nu|Nm', 'Deuteronomy|Deut|Dt',
+  'Joshua|Josh|Jos', 'Judges|Judg|Jdg', 'Ruth|Ru', '1 Samuel|1 Sam|1 Sa', '2 Samuel|2 Sam|2 Sa', '1 Kings|1 Kgs|1 Ki',
+  '2 Kings|2 Kgs|2 Ki', '1 Chronicles|1 Chron|1 Chr', '2 Chronicles|2 Chron|2 Chr', 'Ezra|Ezr', 'Nehemiah|Neh',
+  'Esther|Esth|Est', 'Job', 'Psalms|Psalm|Pss|Ps', 'Proverbs|Prov|Pr', 'Ecclesiastes|Eccles|Eccl|Ecc',
+  'Song of Songs|Song of Solomon|Song', 'Isaiah|Isa|Is', 'Jeremiah|Jer', 'Lamentations|Lam', 'Ezekiel|Ezek|Eze',
+  'Daniel|Dan|Dn', 'Hosea|Hos', 'Joel', 'Amos', 'Obadiah|Obad|Ob', 'Jonah|Jon', 'Micah|Mic', 'Nahum|Nah',
+  'Habakkuk|Hab', 'Zephaniah|Zeph', 'Haggai|Hag', 'Zechariah|Zech', 'Malachi|Mal',
+  'Matthew|Matt|Mt', 'Mark|Mk', 'Luke|Lk', 'John|Jn', 'Acts', 'Romans|Rom', '1 Corinthians|1 Cor', '2 Corinthians|2 Cor',
+  'Galatians|Gal', 'Ephesians|Eph', 'Philippians|Phil', 'Colossians|Col', '1 Thessalonians|1 Thess|1 Th',
+  '2 Thessalonians|2 Thess|2 Th', '1 Timothy|1 Tim', '2 Timothy|2 Tim', 'Titus|Tit', 'Philemon|Phlm|Philem',
+  'Hebrews|Heb', 'James|Jas', '1 Peter|1 Pet|1 Pe', '2 Peter|2 Pet|2 Pe', '1 John|1 Jn', '2 John|2 Jn', '3 John|3 Jn',
+  'Jude', 'Revelation|Rev',
+];
+// Short book codes (as STEP Bible uses), in the same order.
+export const BOOK_CODES = 'Gen Exo Lev Num Deu Jos Jdg Rut 1Sa 2Sa 1Ki 2Ki 1Ch 2Ch Ezr Neh Est Job Psa Pro Ecc Sng Isa Jer Lam Ezk Dan Hos Jol Amo Oba Jon Mic Nam Hab Zep Hag Zec Mal Mat Mrk Luk Jhn Act Rom 1Co 2Co Gal Eph Php Col 1Th 2Th 1Ti 2Ti Tit Phm Heb Jas 1Pe 2Pe 1Jn 2Jn 3Jn Jud Rev'.split(' ');
+
+// The book a reference starts with, as { code, name, index } (or null).
+export function bookOf(ref) {
+  const r = String(ref || '').trim().replace(/^(I{1,3}|First|Second|Third)\s+/i, m => ({ i: '1', ii: '2', iii: '3', first: '1', second: '2', third: '3' })[m.trim().toLowerCase()] + ' ');
+  let best = null;
+  BOOKS.forEach((b, i) => {
+    for (const n of b.split('|')) {
+      const re = new RegExp('^' + n.replace(/ /g, '\\s*') + '\\.?(?=\\s*\\d|\\s*$)', 'i');
+      const m = r.match(re);
+      if (m && (!best || m[0].length > best.len)) best = { code: BOOK_CODES[i], name: b.split('|')[0], index: i, len: m[0].length };
+    }
+  });
+  return best && { code: best.code, name: best.name, index: best.index };
+}
+
 // First chapter (and verse) named in a reference such as "Romans 2:17-3:20" or "Psalm 23".
 export function parseRef(ref) {
   const r = String(ref || '');

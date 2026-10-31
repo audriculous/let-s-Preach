@@ -53,6 +53,18 @@
       <div class="next-foot"><span id="rosterAge"></span><button type="button" class="text-link" id="rosterRefresh">Refresh roster</button></div>
     </section>
 
+    <section id="planCard" class="card plan-card" hidden>
+      <p class="eyebrow" id="planWhen">This week's prep</p>
+      <div class="plan-card-row">
+        <div>
+          <h2 class="plan-card-title" id="planPassage"></h2>
+          <p class="plan-line" id="planLine"></p>
+        </div>
+        <button type="button" class="pill" id="planOpen"><span>Open plan</span></button>
+      </div>
+      <div class="plan-dots" id="planDots"></div>
+    </section>
+
     <form id="fetchForm" class="card" autocomplete="off">
       <p class="eyebrow">New study. Pick a passage</p>
       <h2 class="card-title">Open a passage</h2>
@@ -180,7 +192,11 @@
     </div>
 
     <div id="spotBar" class="spot-bar" hidden>
-      <span class="spot-hint">Tap a word to box every repeat</span>
+      <div class="seg small spot-mode" id="spotMode">
+        <button type="button" data-mode="repeat">Repeats</button>
+        <button type="button" data-mode="study">Word study</button>
+      </div>
+      <span class="spot-hint" id="spotHint">Tap a word to box every repeat</span>
       <div id="spotChips" class="spot-chips"></div>
       <button type="button" id="connBtn" class="spot-chip conn" aria-pressed="false">Connectives</button>
       <span class="spot-label" id="repeatLabel">Repeats</span>
@@ -210,12 +226,14 @@
             <button type="button" data-tab="outline">Outline</button>
             <button type="button" data-tab="compare">Compare</button>
             <button type="button" data-tab="refs">References</button>
+            <button type="button" data-tab="plan">Plan</button>
           </div>
           <button type="button" class="icon-chip small" id="sheetClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         </div>
         <div id="outlinePane" class="sheet-body"></div>
         <div id="comparePane" class="sheet-body" hidden></div>
         <div id="refsPane" class="sheet-body" hidden></div>
+        <div id="planPane" class="sheet-body" hidden></div>
       </aside>
     </div>
 
@@ -354,6 +372,11 @@
       <input id="rosterName" class="field" type="text" placeholder="Your name as it appears on the roster" aria-label="Your name on the roster" autocomplete="off">
       <label class="opt-row"><span>Get my passages ready two weeks ahead</span><input type="checkbox" class="switch" id="rosterPrep"></label>
       <p class="hint" id="rosterStatus"></p>
+
+      <h3 class="card-title">Weekly prep plan</h3>
+      <label class="opt-row"><span>Give each sermon a prep plan</span><input type="checkbox" class="switch" id="planOn"></label>
+      <p class="hint">Your usual week. Each sermon starts with it once it has a date, and you can change any sermon's plan on its own (Plan tab in the study).</p>
+      <div id="planTemplate"></div>
 
       <h3 class="card-title">Sync and backup</h3>
       <p class="hint">Uses the same Worker to keep your iPad and laptop in step, and saves a backup of every study once a day (the last 30 days are kept). Put the same sync code on each device. Keep it private: anyone with it can see your studies.</p>
