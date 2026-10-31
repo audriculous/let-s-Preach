@@ -1149,11 +1149,13 @@ $('preachStudyBtn').addEventListener('click', async () => {
 const normRef = r => String(r || '').toLowerCase().replace(/\s+/g, '').replace(/[–—]/g, '-');
 const niceDate = d => new Date(d + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 
+const isLocal = d => d.source === 'file' || d.source === 'image';
+
 function rosterData() {
   const data = roster.loadCached();
   if (!data) return null;
   // A file-based roster stays until a link replaces it; a link-based one needs the link.
-  if (data.source === 'file' ? settings.rosterUrl : !settings.rosterUrl) return null;
+  if (isLocal(data) ? settings.rosterUrl : !settings.rosterUrl) return null;
   return data;
 }
 
@@ -1190,7 +1192,7 @@ async function renderNextUp() {
   const ready = await Promise.all(later.map(r => studyFor(r, all)));
   $('nextLater').innerHTML = later.map((r, i) => `<li${ready[i] ? ' class="ready"' : ''}><span>${esc(niceDate(r.date))}</span><b>${esc(r.passage)}</b>${r.series ? `<em>${esc(r.series)}</em>` : ''}</li>`).join('');
   const data = rosterData();
-  $('rosterAge').textContent = data ? (data.source === 'file' ? `From ${data.fileName}, ` : 'Roster checked ') + timeAgo(data.fetchedAt) : '';
+  $('rosterAge').textContent = data ? (isLocal(data) ? `From ${data.fileName}, ` : 'Roster checked ') + timeAgo(data.fetchedAt) : '';
 }
 
 const rosterExtra = r => ({ title: r.title || r.passage, series: r.series || '', preached: r.date, rosterDate: r.date, rosterPassage: r.passage });
@@ -1213,9 +1215,10 @@ async function openRosterPassage(r) {
 // Each week as a date comes within two weeks, fetch the passage and set the study up
 // (title, series, date), so it is waiting in the library and works offline.
 const PREP_DAYS = 14;
-let prepping = false;
+let prepping = false, prepAgain = false;
 async function prepAhead() {
-  if (prepping || settings.rosterPrep === false || !navigator.onLine) return;
+  if (prepping) { prepAgain = true; return; }
+  if (settings.rosterPrep === false || !navigator.onLine) return;
   prepping = true;
   const made = [];
   try {
@@ -1243,6 +1246,7 @@ async function prepAhead() {
   } finally {
     prepping = false;
   }
+  if (prepAgain) { prepAgain = false; setTimeout(prepAhead, 0); }
   if (made.length) {
     toast(made.length === 1 ? `${made[0].passage} is ready for ${niceDate(made[0].date)}` : `${made.length} upcoming passages are ready`);
     sync.schedule();
@@ -1253,7 +1257,7 @@ async function prepAhead() {
 async function refreshRoster(force) {
   const data = roster.loadCached();
   if (!settings.rosterUrl) {
-    if (force && data && data.source === 'file') toast(`Choose ${data.fileName} again in Settings to pick up changes`);
+    if (force && data && isLocal(data)) toast(data.source === 'image' ? 'Read a new screenshot in Settings to pick up changes' : `Choose ${data.fileName} again in Settings to pick up changes`);
     renderNextUp(); prepAhead(); return;
   }
   if (force || !data || data.source !== 'link' || Date.now() - data.fetchedAt >= 60 * 60 * 1000) {
@@ -1275,10 +1279,10 @@ function rosterStatusText() {
   const el = $('rosterStatus');
   const data = roster.loadCached();
   const url = $('rosterInput').value.trim();
-  if (!data || (data.source === 'file' ? url : !url)) { el.textContent = url ? 'Not read yet.' : ''; return; }
+  if (!data || (isLocal(data) ? url : !url)) { el.textContent = url ? 'Not read yet.' : ''; return; }
   const name = $('rosterName').value.trim();
   const mineRows = data.hasPreacher ? roster.mine(data.rows, name) : data.rows;
-  el.textContent = `${data.source === 'file' ? `From ${data.fileName}: ` : ''}${data.rows.length} rows read ${timeAgo(data.fetchedAt)}. ${data.hasPreacher ? `${mineRows.length} with ${name ? '"' + name + '"' : 'your name (add it above)'}.` : 'No preacher column, so every row is yours.'} ${roster.upcoming(mineRows).length} upcoming.`;
+  el.textContent = `${isLocal(data) ? `From ${data.fileName}: ` : ''}${data.rows.length} rows read ${timeAgo(data.fetchedAt)}. ${data.hasPreacher ? `${mineRows.length} with ${name ? '"' + name + '"' : 'your name (add it above)'}.` : 'No preacher column, so every row is yours.'} ${roster.upcoming(mineRows).length} upcoming.`;
 }
 
 $('rosterFileBtn').addEventListener('click', () => $('rosterFile').click());
@@ -1299,6 +1303,105 @@ $('rosterFile').addEventListener('change', async e => {
   }
 });
 $('rosterName').addEventListener('input', rosterStatusText);
+
+// ---------- roster from a screenshot ----------
+
+let shotRows = [];
+$('rosterShotBtn').addEventListener('click', () => $('rosterShotFile').click());
+$('rosterShotFile').addEventListener('change', async e => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (!files.length) return;
+  const dlg = $('shotDialog');
+  $('shotName').value = $('rosterName').value.trim() || settings.rosterName || '';
+  $('shotProgress').hidden = false;
+  $('shotReview').hidden = true;
+  $('shotOk').disabled = true;
+  $('shotBar').style.width = '0';
+  $('shotStatus').textContent = 'Getting ready. The first time takes a little longer (about 11 MB, then it works offline).';
+  $('shotImgs').innerHTML = '';
+  files.forEach(f => { const img = new Image(); img.src = URL.createObjectURL(f); $('shotImgs').appendChild(img); });
+  dlg.showModal();
+  try {
+    const { readScreenshots } = await import('./rosterocr.js');
+    shotRows = await readScreenshots(files, (f, label) => {
+      $('shotBar').style.width = Math.round(f * 100) + '%';
+      $('shotStatus').textContent = label + '…';
+    });
+    shotRows.forEach(r => { r.on = true; });
+    if (!dlg.open) return;
+    $('shotProgress').hidden = true;
+    $('shotReview').hidden = false;
+    renderShotRows();
+  } catch (err) {
+    console.error(err);
+    $('shotStatus').textContent = 'Could not read that image. ' + (navigator.onLine ? '' : 'The first read needs the internet. ') + 'Try a clearer screenshot.';
+  }
+});
+
+function shotMine(r, name) {
+  const parts = name.toLowerCase().split(/\s+/).filter(p => p.length > 1);
+  const p = r.preacher.toLowerCase();
+  return parts.length > 0 && parts.some(x => p.includes(x));
+}
+
+function renderShotRows() {
+  const name = $('shotName').value.trim();
+  $('shotRows').innerHTML = shotRows.map((r, i) => `<tr data-i="${i}" class="${[shotMine(r, name) ? 'mine' : '', r.unsure ? 'unsure' : '', r.on ? '' : 'off'].join(' ')}">
+    <td><input type="checkbox" data-k="on" ${r.on ? 'checked' : ''} aria-label="Include this row"></td>
+    <td><input type="date" data-k="date" value="${esc(r.date)}"></td>
+    <td><input type="text" class="p" data-k="passage" value="${esc(r.passage)}" placeholder="Passage?"></td>
+    <td><input type="text" data-k="preacher" value="${esc(r.preacher)}"></td>
+    <td><input type="text" data-k="title" value="${esc(r.title)}"></td></tr>`).join('');
+  shotSummary();
+}
+
+function shotSummary() {
+  const name = $('shotName').value.trim();
+  const used = shotRows.filter(r => r.on && r.date && r.passage);
+  const mine = used.filter(r => shotMine(r, name));
+  const unsure = shotRows.filter(r => r.on && !r.passage).length;
+  $('shotSummary').textContent = !shotRows.length ? 'No dates found in that image. Try a sharper screenshot that includes the dates, or add rows yourself.' :
+    `Found ${shotRows.length} row${shotRows.length === 1 ? '' : 's'}${name ? `, ${mine.length} with "${name}" (shaded)` : '. Add your name above to pick out yours'}. Tap any cell to fix it.` +
+    (unsure ? ` ${unsure} passage${unsure === 1 ? ' needs' : 's need'} filling in.` : '');
+  $('shotOk').disabled = !used.length;
+}
+
+$('shotName').addEventListener('input', renderShotRows);
+$('shotRows').addEventListener('input', e => {
+  const tr = e.target.closest('tr'), k = e.target.dataset.k;
+  if (!tr || !k) return;
+  const r = shotRows[+tr.dataset.i];
+  r[k] = k === 'on' ? e.target.checked : e.target.value.trim();
+  if (k === 'passage') r.unsure = !r.passage;
+  tr.className = [shotMine(r, $('shotName').value.trim()) ? 'mine' : '', r.unsure ? 'unsure' : '', r.on ? '' : 'off'].join(' ');
+  shotSummary();
+});
+$('shotAddRow').addEventListener('click', () => {
+  shotRows.push({ date: roster.isoDay(new Date()), passage: '', preacher: $('shotName').value.trim(), series: '', title: '', service: '', unsure: true, on: true });
+  renderShotRows();
+  $('shotRows').lastElementChild.querySelector('[data-k=passage]').focus();
+});
+$('shotDialog').addEventListener('close', () => {
+  $('shotImgs').querySelectorAll('img').forEach(i => URL.revokeObjectURL(i.src));
+  if ($('shotDialog').returnValue !== 'ok') return;
+  const name = $('shotName').value.trim();
+  const rows = shotRows.filter(r => r.on && r.date && r.passage)
+    .map(({ date, passage, preacher, series, title, service }) => ({ date, passage, preacher: preacher || '', series: series || '', title: title || '', service: service || '' }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  roster.saveRoster({ fetchedAt: Date.now(), source: 'image', fileName: 'your screenshot', rows, hasPreacher: rows.some(r => r.preacher) });
+  settings.rosterUrl = '';
+  settings.rosterName = name;
+  saveSettings();
+  $('rosterInput').value = '';
+  $('rosterName').value = name;
+  localStorage.removeItem('letspreach.prepTried');
+  rosterStatusText();
+  const n = roster.upcoming(roster.mine(rows, name)).length;
+  toast(n ? `Roster saved: ${n} upcoming for you` : 'Roster saved, but nothing upcoming with your name');
+  renderNextUp();
+  prepAhead();
+});
 
 $('rosterRefresh').addEventListener('click', () => refreshRoster(true));
 

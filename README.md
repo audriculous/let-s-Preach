@@ -55,6 +55,8 @@ The worker only fetches Bible Gateway passages, so nobody can misuse it as a gen
 
 **Roster in Excel?** In Settings choose **Choose the Excel or CSV file** and pick it from Files (OneDrive, iCloud Drive and so on). The app tries each sheet in the workbook until it finds the Date and Passage headings. A file does not update itself, so choose it again when the roster changes, or upload it to Google Sheets to get automatic updates.
 
+**Roster only in a Google Doc, an email or on paper?** In Settings choose **Read it from a screenshot or photo** and pick one or more screenshots. The app reads the table on the iPad itself (no upload; the reader is about 11 MB, downloaded the first time and then offline), shows every row it found with yours shaded once you type your name, and lets you fix any cell before you tap **Use this roster**. Works with table borders, dark mode and dates written like 8/11/2026 or Sun 8 Nov. Read a new screenshot when the roster changes.
+
 **Passages ready ahead:** with **Get my passages ready two weeks ahead** on (the default), each of your roster dates fetches its passage once it is 14 days away and creates the study with its title, series and date. The home screen marks it **Ready for you**.
 
 The roster is checked each time you open the app (at most once an hour) and with **Refresh roster**. If Google will not let the app read the sheet directly, it goes through your Worker (the updated `worker/worker.js` adds a small relay that only reads Google Sheets).

@@ -62,6 +62,7 @@ export function parseDate(s, now = new Date()) {
 }
 
 function withYear(d, mo, y, now) {
+  if (!(mo >= 0 && mo <= 11 && d >= 1 && d <= 31)) return null;
   if (y) { y = +y; if (y < 100) y += 2000; return new Date(y, mo, d); }
   // No year: the nearest such date, not more than about six months back.
   let date = new Date(now.getFullYear(), mo, d);
@@ -117,6 +118,8 @@ export function upcoming(rows, today = new Date()) {
 export function loadCached() {
   try { return JSON.parse(localStorage.getItem(CACHE) || 'null'); } catch { return null; }
 }
+
+export function saveRoster(data) { return save(data); }
 
 function save(data) {
   try { localStorage.setItem(CACHE, JSON.stringify(data)); } catch {}

@@ -773,3 +773,23 @@ body.preaching { overflow: hidden; }
 .cc .pad-tools button { min-height: 32px; font-size: 13px; }
 .cc-mode { font-size: 14px; padding: 6px 0 2px; }
 .preach-controls .select { padding-right: 38px; background-position: right 12px center; }
+
+/* Roster from a screenshot */
+.shot-dialog { width: min(980px, calc(100vw - 32px)); max-width: none; }
+.shot-name { display: flex; flex-direction: column; gap: 6px; font-weight: 600; color: var(--muted); font-size: 15px; }
+.shot-progress .shot-bar { height: 8px; border-radius: 4px; background: rgba(0,0,0,.08); overflow: hidden; }
+.shot-progress .shot-bar i { display: block; height: 100%; width: 0; background: #e0a32e; transition: width .3s; }
+.shot-wrap { max-height: 46vh; overflow: auto; border-radius: 12px; border: 1px solid rgba(0,0,0,.08); }
+.shot-table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.shot-table th { position: sticky; top: 0; background: #f4f2ee; text-align: left; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 8px 6px; }
+.shot-table td { padding: 4px; border-top: 1px solid rgba(0,0,0,.06); }
+.shot-table input[type=text], .shot-table input[type=date] { width: 100%; min-width: 0; border: 1px solid transparent; background: transparent; border-radius: 8px; padding: 8px; font: inherit; color: inherit; }
+.shot-table input:focus { border-color: #e0a32e; background: #fff; outline: none; }
+.shot-table td:nth-child(2) { width: 150px; }
+.shot-table tr.mine td { background: rgba(224,163,46,.12); }
+.shot-table tr.mine td:first-child::after { content: 'Yours'; display: block; font-size: 11px; font-weight: 800; color: #b07a12; text-transform: uppercase; }
+.shot-table tr.unsure input.p { background: rgba(181,82,59,.12); }
+.shot-table tr.off td { opacity: .4; }
+.shot-table input[type=checkbox] { width: 22px; height: 22px; accent-color: #e0a32e; }
+.shot-imgs summary { cursor: pointer; font-weight: 600; color: var(--muted); }
+.shot-imgs img { max-width: 100%; display: block; margin-top: 8px; border-radius: 8px; }

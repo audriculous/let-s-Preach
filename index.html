@@ -348,6 +348,8 @@
       <p class="hint">Paste the link to your roster in Google Sheets. Easiest: in Sheets choose File, Share, Publish to web, pick the roster tab and "Comma-separated values (.csv)", then copy that link. It updates itself whenever the sheet changes. The sheet needs headings like Date, Preacher and Passage (Series and Title are used if there).</p>
       <input id="rosterInput" class="field" type="url" placeholder="https://docs.google.com/spreadsheets/…" aria-label="Roster link">
       <p class="hint">Roster in Excel? <button type="button" class="text-link" id="rosterFileBtn">Choose the Excel or CSV file</button> from Files instead. Choose it again when the roster changes.</p>
+      <p class="hint">Only have it as a Google Doc, an email or on paper? <button type="button" class="text-link" id="rosterShotBtn">Read it from a screenshot or photo</button>. You check the rows before anything is saved.</p>
+      <input type="file" id="rosterShotFile" accept="image/*" multiple hidden>
       <input type="file" id="rosterFile" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
       <input id="rosterName" class="field" type="text" placeholder="Your name as it appears on the roster" aria-label="Your name on the roster" autocomplete="off">
       <label class="opt-row"><span>Get my passages ready two weeks ahead</span><input type="checkbox" class="switch" id="rosterPrep"></label>
@@ -370,6 +372,29 @@
       <div class="dialog-actions">
         <button value="cancel" class="chip-btn">Cancel</button>
         <button value="ok" class="pill"><span>Save</span></button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Roster from a screenshot -->
+  <dialog id="shotDialog" class="dialog shot-dialog">
+    <form method="dialog" class="dialog-inner">
+      <p class="eyebrow">Roster from a screenshot</p>
+      <h3 class="card-title">Check your roster</h3>
+      <label class="shot-name"><span>Your name on the roster</span><input id="shotName" class="field" type="text" autocomplete="off" placeholder="e.g. Audric"></label>
+      <div id="shotProgress" class="shot-progress"><div class="shot-bar"><i id="shotBar"></i></div><p class="hint" id="shotStatus">Getting ready…</p></div>
+      <div id="shotReview" hidden>
+        <p class="hint" id="shotSummary"></p>
+        <div class="shot-wrap"><table class="shot-table">
+          <thead><tr><th></th><th>Date</th><th>Passage</th><th>Preacher</th><th>Title</th></tr></thead>
+          <tbody id="shotRows"></tbody>
+        </table></div>
+        <button type="button" class="text-link" id="shotAddRow">Add a row</button>
+        <details class="shot-imgs"><summary>Compare with the screenshot</summary><div id="shotImgs"></div></details>
+      </div>
+      <div class="dialog-actions">
+        <button value="cancel" class="chip-btn">Cancel</button>
+        <button value="ok" class="pill" id="shotOk" disabled><span>Use this roster</span></button>
       </div>
     </form>
   </dialog>
