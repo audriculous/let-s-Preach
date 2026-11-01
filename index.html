@@ -43,6 +43,36 @@
 
     <h1 id="greeting" class="greeting">Good morning</h1>
 
+    <div class="seg mode-seg" id="modeSeg" role="tablist" aria-label="Prepare or listen">
+      <button type="button" data-mode="prep" role="tab">Prepare</button>
+      <button type="button" data-mode="listen" role="tab">Listen</button>
+    </div>
+
+    <div id="listenArea" hidden>
+      <section class="card" id="listenNew">
+        <p class="eyebrow">Listening. Someone else is preaching</p>
+        <h2 class="card-title">Sermon notes</h2>
+        <p class="card-body">Write with the Pencil as you listen. Nothing here touches your sermon prep.</p>
+        <div class="ln-form">
+          <input id="lnTitle" class="field" type="text" placeholder="Sermon title (if you know it)" aria-label="Sermon title" autocomplete="off">
+          <input id="lnPassage" class="field" type="text" placeholder="Passage, e.g. John 15:1-17" aria-label="Passage" autocapitalize="words" autocomplete="off">
+          <input id="lnPreacher" class="field" type="text" placeholder="Preacher" aria-label="Preacher" list="lnPreachers" autocomplete="off">
+          <input id="lnWhere" class="field" type="text" placeholder="Church, conference or event" aria-label="Where" list="lnPlaces" autocomplete="off">
+          <input id="lnDate" class="field" type="date" aria-label="Date">
+        </div>
+        <datalist id="lnPreachers"></datalist><datalist id="lnPlaces"></datalist>
+        <button type="button" class="pill" id="lnStart"><span>Start notes</span></button>
+      </section>
+      <div class="lib-tools" id="lnTools" hidden>
+        <input id="lnSearch" class="field search" type="search" placeholder="Search your sermon notes" aria-label="Search sermon notes" autocomplete="off">
+      </div>
+      <p class="eyebrow list-eyebrow" id="lnListHead" hidden>Your sermon notes</p>
+      <p class="hint no-matches" id="lnEmpty" hidden>No notes match.</p>
+      <ul id="listenList" class="study-list"></ul>
+    </div>
+
+    <div id="prepArea">
+
     <section id="nextUp" class="card next-card" hidden>
       <p class="eyebrow" id="nextWhen">Next up</p>
       <h2 class="card-title" id="nextPassage"></h2>
@@ -122,6 +152,31 @@
     <div id="studiesBlock">
       <p class="eyebrow list-eyebrow">Your studies</p>
       <ul id="studyList" class="study-list"></ul>
+    </div>
+    </div>
+  </section>
+
+  <!-- ============ SERMON NOTES (listening) ============ -->
+  <section id="listenView" class="view listen-view" hidden>
+    <header class="lv-bar">
+      <button type="button" class="tb-btn" id="lvBack" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <input id="lvTitle" class="lv-title" type="text" placeholder="Sermon notes" aria-label="Title" autocomplete="off">
+      <button type="button" class="tb-btn" id="lvUndo" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg></button>
+      <button type="button" class="tb-btn" id="lvRedo" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 000 12h3"/></svg></button>
+      <button type="button" class="chip-btn small" id="lvCopy">Share text</button>
+      <button type="button" class="chip-btn small" id="lvShare">Share PDF</button>
+    </header>
+    <div class="lv-scroll" id="lvScroll">
+      <div class="lv-inner">
+        <div class="lv-meta">
+          <input id="lvPreacher" class="field" type="text" placeholder="Preacher" aria-label="Preacher" autocomplete="off">
+          <input id="lvPassageRef" class="field" type="text" placeholder="Passage" aria-label="Passage" autocomplete="off">
+          <input id="lvWhere" class="field" type="text" placeholder="Where" aria-label="Where" autocomplete="off">
+          <input id="lvDate" class="field" type="date" aria-label="Date">
+        </div>
+        <div id="lvPassage" class="lv-passage"></div>
+        <div id="lvSections"></div>
+      </div>
     </div>
   </section>
 
@@ -445,6 +500,15 @@
       <select class="field select small" id="preachTargetSel" aria-label="Sermon length"></select>
       <div class="seg"><button type="button" data-pzoom="-1" aria-label="Smaller">A−</button><button type="button" data-pzoom="1" aria-label="Bigger">A+</button></div>
       <button type="button" class="chip-btn" id="preachDim">Dim</button>
+      <button type="button" class="chip-btn" id="preachTrim" aria-pressed="true" title="Cut the empty margins so A+ makes the words bigger">Trim</button>
+      <span class="preach-sep" aria-hidden="true"></span>
+      <div class="seg" id="preachTools" aria-label="Write on the PDF">
+        <button type="button" data-ptool="pen">Pen</button>
+        <button type="button" data-ptool="highlighter">Highlight</button>
+        <button type="button" data-ptool="eraser">Erase</button>
+      </div>
+      <div class="pc-colors" id="preachColors"></div>
+      <button type="button" class="tb-btn" id="preachUndo" aria-label="Undo" title="Undo" disabled><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg></button>
     </div>
     <div class="preach-pages" id="preachPages"></div>
     <div class="preach-pageno" id="preachPageNo"></div>

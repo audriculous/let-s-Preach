@@ -1,7 +1,7 @@
 import { Ink, PAGE_W } from './ink.js';
 import { fetchPassage, passageFromText } from './bible.js';
 import * as db from './db.js';
-import { exportPdf } from './pdf.js';
+import { exportPdf, exportNotesPdf } from './pdf.js';
 import { Ruler } from './ruler.js';
 import { Marks, SPOT_COLORS } from './marks.js';
 import { initSheet, emptyOutline } from './sheet.js';
@@ -12,6 +12,7 @@ import * as roster from './roster.js';
 import { walkVerses } from './verses.js';
 import { initWordStudy } from './wordstudy.js';
 import * as plan from './plan.js';
+import { initListen, isListen } from './listen.js';
 
 const $ = id => document.getElementById(id);
 
@@ -115,9 +116,30 @@ const wordStudy = initWordStudy({
   toast,
   onKeep: () => sheet.render(),
 });
+const listen = initListen({
+  db, fetchPassage, toast, exportNotesPdf,
+  getWorker: () => settings.workerUrl,
+  getVersion: () => $('versionSelect').value || 'NIV',
+  pen: () => ({ color: prefs.color.pen, size: SIZES.pen[prefs.size.pen] ?? SIZES.pen[2], smoothing: prefs.smoothing }),
+  fingerDraw: () => prefs.fingerDraw,
+  onSaved: () => sync.schedule(),
+  showHome: () => { $('library').hidden = false; renderLibrary(); },
+});
+
+// Home has two sides: Prepare (your own sermons) and Listen (notes on other people's).
+function syncMode() {
+  const mode = prefs.homeMode === 'listen' ? 'listen' : 'prep';
+  document.querySelectorAll('#modeSeg button').forEach(b => { b.classList.toggle('active', b.dataset.mode === mode); b.setAttribute('aria-selected', b.dataset.mode === mode); });
+  $('prepArea').hidden = mode !== 'prep';
+  $('listenArea').hidden = mode !== 'listen';
+}
+document.querySelectorAll('#modeSeg button').forEach(b => b.addEventListener('click', () => {
+  prefs.homeMode = b.dataset.mode; savePrefs(); renderLibrary();
+}));
+
 const sync = initSync({
   settings, saveSettings,
-  getOpenId: () => study && study.id,
+  getOpenId: () => (study && study.id) || listen.openId,
   onRemoteChange: () => { if (!study) renderLibrary(); },
 });
 
@@ -199,11 +221,16 @@ function matches(s, q) {
   return q.split(/\s+/).every(w => hay.includes(w));
 }
 
+// Sermon prep studies only (listening notes live in the Listen tab).
+const prepStudies = async () => (await db.allStudies()).filter(s => !isListen(s));
+
 async function renderLibrary() {
+  syncMode();
+  if (prefs.homeMode === 'listen') { listen.renderHome(); return; }
   renderNextUp();
   renderPlanCard();
   renderDecks();
-  const all = (await db.allStudies()).sort((a, b) => b.updated - a.updated);
+  const all = (await prepStudies()).sort((a, b) => b.updated - a.updated);
   const q = $('searchInput').value.trim().toLowerCase();
   renderFilters(all);
   const list = all.filter(s => matches(s, q));
@@ -956,7 +983,7 @@ function syncPanel() {
   $('seriesInput').value = study.series || '';
   $('tagsInput').value = (study.tags || []).join(', ');
   $('preachedInput').value = study.preached || '';
-  db.allStudies().then(all => {
+  prepStudies().then(all => {
     $('seriesList').innerHTML = [...new Set(all.map(s => s.series).filter(Boolean))].sort().map(x => `<option value="${esc(x)}">`).join('');
   });
   $('fingerDraw').checked = prefs.fingerDraw;
@@ -1209,7 +1236,7 @@ function myUpcoming() {
 }
 
 async function studyFor(r, all) {
-  all = all || await db.allStudies();
+  all = all || await prepStudies();
   return all.find(s => s.rosterDate === r.date && normRef(s.rosterPassage) === normRef(r.passage)) ||
     all.find(s => s.passage && normRef(s.passage.reference) === normRef(r.passage));
 }
@@ -1220,7 +1247,7 @@ async function renderPlanCard() {
   const card = $('planCard');
   if (settings.planOn === false) { card.hidden = true; return; }
   const now = plan.today();
-  const all = await db.allStudies();
+  const all = await prepStudies();
   const soon = all.filter(s => s.preached && s.preached >= now && plan.daysBetween(now, s.preached) <= 13)
     .sort((a, b) => a.preached.localeCompare(b.preached));
   const s = soon[0];
@@ -1252,7 +1279,7 @@ async function renderNextUp() {
   $('nextWhen').textContent = `Next up · ${when} · ${niceDate(next.date)}`;
   $('nextPassage').textContent = next.passage;
   $('nextMeta').textContent = [next.title, next.series, next.service].filter(Boolean).join(' · ') || ' ';
-  const all = await db.allStudies();
+  const all = await prepStudies();
   const existing = await studyFor(next, all);
   const fresh = existing && existing.prepped && existing.modified === existing.created;
   $('nextOpen').querySelector('span').textContent = existing ? (fresh ? 'Start study' : 'Continue study') : 'Open passage';
@@ -1293,7 +1320,7 @@ async function prepAhead() {
   const made = [];
   try {
     const soon = myUpcoming().filter(r => (new Date(r.date + 'T12:00') - new Date()) / 864e5 <= PREP_DAYS);
-    const all = await db.allStudies();
+    const all = await prepStudies();
     const tried = JSON.parse(localStorage.getItem('letspreach.prepTried') || '{}');
     for (const r of soon) {
       const key = r.date + '|' + normRef(r.passage);

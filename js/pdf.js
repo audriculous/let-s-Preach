@@ -283,21 +283,30 @@ function layoutOutline(study) {
     }
   }
 
-  // Wrap into lines, then into pages.
+  return paginate(blocks);
+}
+
+// Wrap text blocks into lines and lay everything out on A4 pages. Handwriting that
+// runs past the bottom of a page carries on at the top of the next.
+function paginate(blocks) {
   const ctx = document.createElement('canvas').getContext('2d');
   const pages = [[]];
   let y = TOP;
   for (const b of blocks) {
     if (b.pad) {
-      // Handwriting: only as tall as the writing, scaled to the text width.
       const k = TW / PAD_W;
       let bottom = 0;
       for (const st of b.pad.strokes) for (let i = 1; i < st.pts.length; i += 3) bottom = Math.max(bottom, st.pts[i]);
-      const h = (bottom + 16) * k;
+      const total = bottom + 16;
       y += b.gap;
-      if (y + h > BOTTOM && y > TOP) { pages.push([]); y = TOP; }
-      pages[pages.length - 1].push({ pad: b.pad, y, k });
-      y += h;
+      let from = 0;
+      while (from < total) {
+        if (BOTTOM - y < 120 && y > TOP) { pages.push([]); y = TOP; }
+        const to = Math.min(total, from + (BOTTOM - y) / k);
+        pages[pages.length - 1].push({ pad: b.pad, y, k, from, to });
+        y += (to - from) * k;
+        from = to;
+      }
       continue;
     }
     ctx.font = b.style.font;
@@ -338,7 +347,10 @@ function renderTextPage(lines, footer) {
   for (const l of lines) {
     if (l.pad) {
       ctx.save();
-      ctx.translate(TX, l.y);
+      ctx.beginPath();
+      ctx.rect(TX - 10, l.y, TW + 20, (l.to - l.from) * l.k);
+      ctx.clip();
+      ctx.translate(TX, l.y - l.from * l.k);
       ctx.scale(l.k, l.k);
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       for (const st of l.pad.strokes) drawStroke(ctx, st);
@@ -413,4 +425,27 @@ function buildPdf(jpegs, imgW, imgH) {
   push(table);
   push(`trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
   return new Blob(chunks, { type: 'application/pdf' });
+}
+
+// ---------- sermon notes (listening) ----------
+
+// sections: [{ label, text, pad }] in order; empty ones are left out.
+export async function exportNotesPdf({ title, eyebrow, meta, sections }) {
+  if (document.fonts) await document.fonts.ready;
+  const blocks = [];
+  const add = (style, text, gap = 0, indent = 0) => { if (text && String(text).trim()) blocks.push({ style, text: String(text), gap, indent }); };
+  add(T.eyebrow, eyebrow);
+  add(T.title, title, 4);
+  add(T.muted, meta, 4);
+  sections.forEach((sec, i) => {
+    const inked = sec.pad && sec.pad.strokes.length ? sec.pad : null;
+    if (!String(sec.text || '').trim() && !inked) return;
+    add(T.eyebrow, sec.label, i ? 26 : 30);
+    add(T.body, sec.text, 4);
+    if (inked) blocks.push({ pad: inked, gap: 6, indent: 0 });
+  });
+  const pages = paginate(blocks);
+  const jpegs = [];
+  for (let i = 0; i < pages.length; i++) jpegs.push(await renderTextPage(pages[i], `Let’s Preach  ·  ${title}  ·  ${i + 1} of ${pages.length}`));
+  return buildPdf(jpegs, PAGE_W * RES, PAGE_H * RES);
 }

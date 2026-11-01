@@ -883,3 +883,49 @@ body.preaching { overflow: hidden; }
 .tpl-foot { display: flex; justify-content: space-between; margin-bottom: 8px; }
 .plan-card .pill { width: auto; flex: none; padding-left: 28px; padding-right: 28px; }
 .plan-card-row > div { flex: 1; min-width: 260px; }
+
+/* ---------- Listening: sermon notes ---------- */
+.mode-seg { margin: -6px 0 18px; }
+.mode-seg button { font-size: 17px; padding: 9px 22px; }
+.ln-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 14px; }
+.ln-form #lnTitle { grid-column: 1 / -1; }
+@media (max-width: 600px) { .ln-form { grid-template-columns: 1fr; } }
+#listenList { margin-bottom: 40px; }
+.listen-view { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); z-index: 5; }
+.lv-bar {
+  flex: none; display: flex; align-items: center; gap: 6px; padding: calc(8px + var(--safe-top)) 12px 8px;
+  border-bottom: 1px solid var(--chip-line); background: var(--bg);
+}
+.lv-bar .chip-btn.small { margin-top: 0; }
+.lv-bar .tb-btn:disabled { opacity: .35; }
+.lv-title {
+  flex: 1; min-width: 0; border: 0; background: transparent; font-family: var(--display); font-weight: 900; font-style: italic;
+  text-transform: uppercase; font-size: 28px; color: var(--ink); padding: 4px 6px;
+}
+.lv-title:focus { outline: none; box-shadow: inset 0 -2px 0 var(--accent); }
+.lv-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.lv-inner { max-width: 900px; margin: 0 auto; padding: 16px 20px 80px; }
+.lv-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.lv-meta .field { min-height: 44px; font-size: 15px; }
+@media (max-width: 760px) { .lv-meta { grid-template-columns: 1fr 1fr; } }
+.lv-passage { margin-bottom: 8px; }
+.lv-passage .chip-btn.small { margin-top: 0; }
+.ln-passage { max-height: 50vh; overflow-y: auto; }
+.ln-sec { background: var(--card); border-radius: 20px; padding: 12px 16px 8px; margin-bottom: 12px; }
+.ln-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.ln-head .eyebrow { margin: 0; }
+.ln-head .cc-hint { margin: 0; }
+.ln-prompts { margin: 4px 0 20px; }
+
+/* ---------- Writing on a preach PDF ---------- */
+.preach-page { position: relative; }
+.preach-page canvas.preach-ink { position: absolute; left: 0; top: 0; touch-action: pan-x pan-y; }
+.preach.locked .preach-ink { pointer-events: none; }
+.preach-sep { width: 1px; align-self: stretch; background: var(--chip-line); margin: 0 4px; }
+#preachTrim.on { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+#preachUndo:disabled { opacity: .4; }
+.pc-colors { display: flex; gap: 6px; align-items: center; }
+.pc-dot { width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--card); background: var(--c); box-shadow: 0 0 0 1.5px var(--chip-line); cursor: pointer; padding: 0; }
+.pc-dot.on { box-shadow: 0 0 0 2.5px var(--ink); }
+.preach-pages { align-items: flex-start; overflow-x: auto; touch-action: pan-x pan-y; }
+.preach-page { margin: 0 auto; }
