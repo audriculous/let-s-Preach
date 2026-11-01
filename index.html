@@ -28,6 +28,9 @@
         <span class="logo-dash" aria-hidden="true"></span>
       </div>
       <div class="header-actions">
+        <button type="button" id="listenBtn" class="icon-chip" title="Sermon notes (when you are listening)" aria-label="Sermon notes" aria-pressed="false">
+          <svg viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0116 0v3"/><rect x="3" y="14" width="4.5" height="6.5" rx="1.5"/><rect x="16.5" y="14" width="4.5" height="6.5" rx="1.5"/></svg>
+        </button>
         <button type="button" id="importBtn" class="icon-chip" title="Restore from backup" aria-label="Restore from backup">
           <svg viewBox="0 0 24 24"><path d="M12 15V4"/><path d="M8 11l4 4 4-4"/><path d="M5 20h14"/></svg>
         </button>
@@ -43,14 +46,9 @@
 
     <h1 id="greeting" class="greeting">Good morning</h1>
 
-    <div class="seg mode-seg" id="modeSeg" role="tablist" aria-label="Prepare or listen">
-      <button type="button" data-mode="prep" role="tab">Prepare</button>
-      <button type="button" data-mode="listen" role="tab">Listen</button>
-    </div>
-
     <div id="listenArea" hidden>
       <section class="card" id="listenNew">
-        <p class="eyebrow">Listening. Someone else is preaching</p>
+        <div class="ln-top"><p class="eyebrow">Listening. Someone else is preaching</p><button type="button" class="text-link" id="lnBackToPrep">Back to sermon prep</button></div>
         <h2 class="card-title">Sermon notes</h2>
         <p class="card-body">Write with the Pencil as you listen. Nothing here touches your sermon prep.</p>
         <div class="ln-form">

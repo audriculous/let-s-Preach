@@ -885,8 +885,9 @@ body.preaching { overflow: hidden; }
 .plan-card-row > div { flex: 1; min-width: 260px; }
 
 /* ---------- Listening: sermon notes ---------- */
-.mode-seg { margin: -6px 0 18px; }
-.mode-seg button { font-size: 17px; padding: 9px 22px; }
+#listenBtn.on { background: var(--label); color: #fff; }
+.ln-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.ln-top .text-link { font-size: 15px; }
 .ln-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 14px; }
 .ln-form #lnTitle { grid-column: 1 / -1; }
 @media (max-width: 600px) { .ln-form { grid-template-columns: 1fr; } }

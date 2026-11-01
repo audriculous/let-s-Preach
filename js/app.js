@@ -129,13 +129,14 @@ const listen = initListen({
 // Home has two sides: Prepare (your own sermons) and Listen (notes on other people's).
 function syncMode() {
   const mode = prefs.homeMode === 'listen' ? 'listen' : 'prep';
-  document.querySelectorAll('#modeSeg button').forEach(b => { b.classList.toggle('active', b.dataset.mode === mode); b.setAttribute('aria-selected', b.dataset.mode === mode); });
+  $('listenBtn').classList.toggle('on', mode === 'listen');
+  $('listenBtn').setAttribute('aria-pressed', mode === 'listen');
   $('prepArea').hidden = mode !== 'prep';
   $('listenArea').hidden = mode !== 'listen';
 }
-document.querySelectorAll('#modeSeg button').forEach(b => b.addEventListener('click', () => {
-  prefs.homeMode = b.dataset.mode; savePrefs(); renderLibrary();
-}));
+function setHomeMode(mode) { prefs.homeMode = mode; savePrefs(); renderLibrary(); window.scrollTo(0, 0); }
+$('listenBtn').addEventListener('click', () => setHomeMode(prefs.homeMode === 'listen' ? 'prep' : 'listen'));
+$('lnBackToPrep').addEventListener('click', () => setHomeMode('prep'));
 
 const sync = initSync({
   settings, saveSettings,
