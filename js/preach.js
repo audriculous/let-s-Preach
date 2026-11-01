@@ -135,7 +135,21 @@ export function initPreach({ toast, prefs, savePrefs }) {
   async function keepAwake() {
     try { if ('wakeLock' in navigator && !document.hidden) wake = await navigator.wakeLock.request('screen'); } catch { wake = null; }
   }
-  document.addEventListener('visibilitychange', () => { if (!view.hidden && !document.hidden) { keepAwake(); drawTimer(); } });
+  // Locking the iPad, closing its cover or switching apps pauses the timer.
+  let pausedAway = false;
+  const pauseAway = () => {
+    if (view.hidden || !timer || !timer.start) return;
+    timer.acc += Date.now() - timer.start; timer.start = null;
+    saveTimer(timer);
+    pausedAway = true;
+  };
+  window.addEventListener('pagehide', pauseAway);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { pauseAway(); return; }
+    if (view.hidden) return;
+    keepAwake(); drawTimer();
+    if (pausedAway) { pausedAway = false; toast(`Timer paused at ${fmt(elapsed())} while you were away. ${locked ? 'Hold the lock, then tap Start and lock' : 'Tap Resume'} to carry on.`); }
+  });
 
   // ---------- pages ----------
   async function renderAll() {
