@@ -28,6 +28,9 @@
         <span class="logo-dash" aria-hidden="true"></span>
       </div>
       <div class="header-actions">
+        <button type="button" id="scriptsBtn" class="icon-chip" title="Sermon scripts" aria-label="Sermon scripts" aria-pressed="false">
+          <svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4"/><path d="M9.5 11.5h6M9.5 14.5h6M9.5 17.5h4"/></svg>
+        </button>
         <button type="button" id="listenBtn" class="icon-chip" title="Sermon notes (when you are listening)" aria-label="Sermon notes" aria-pressed="false">
           <svg viewBox="0 0 24 24"><path d="M4 7.5l16-3v3l-16 3z"/><path d="M7 11.5h10l-1.5 8h-7z"/><path d="M5.5 20.5h13"/><path d="M12 13.5v4M10.3 15h3.4"/></svg>
         </button>
@@ -45,6 +48,22 @@
     </header>
 
     <h1 id="greeting" class="greeting">Good morning</h1>
+
+    <div id="scriptsArea" hidden>
+      <section class="card" id="scriptsCard">
+        <div class="ln-top"><p class="eyebrow">Your sermon scripts</p><button type="button" class="text-link" id="scBackToPrep">Back to sermon prep</button></div>
+        <h2 class="card-title">Scripts</h2>
+        <p class="card-body">Your sermon PDFs, kept apart from your studies. Tap one to preach it full screen with the timer, write on it, and trim its margins.</p>
+        <button type="button" class="pill" id="importPdfBtn"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Add a script (PDF)</span></button>
+        <p class="hint" id="deckHint">Save your sermon from Word, Pages or Google Docs as a PDF, then pick it from Files, or drag it here. Studies you preach with Preach this study land here too.</p>
+        <input type="file" id="pdfFile" accept="application/pdf,.pdf" hidden>
+      </section>
+      <div class="lib-tools" id="scTools" hidden>
+        <input id="scSearch" class="field search" type="search" placeholder="Search your scripts" aria-label="Search scripts" autocomplete="off">
+      </div>
+      <p class="hint no-matches" id="scEmpty" hidden>No scripts match.</p>
+      <ul id="deckList" class="study-list"></ul>
+    </div>
 
     <div id="listenArea" hidden>
       <section class="card" id="listenNew">
@@ -129,18 +148,6 @@
     <p id="noMatches" class="hint no-matches" hidden>No studies match.</p>
 
 
-    <div id="preachBlock">
-      <div class="list-head">
-        <p class="eyebrow list-eyebrow">Ready to preach</p>
-        <button type="button" class="chip-btn small" id="importPdfBtn">
-          <svg viewBox="0 0 24 24"><path d="M7 4h7l4 4v12H7z"/><path d="M14 4v4h4"/><path d="M12 11v6M9.5 14.5L12 17l2.5-2.5"/></svg>
-          <span>Preach a PDF</span>
-        </button>
-      </div>
-      <p class="hint" id="deckHint">Import your sermon PDF (from Word, Pages or Google Docs) to preach from it full screen with a timer. Pick it from Files, or drag it here.</p>
-      <ul id="deckList" class="study-list"></ul>
-      <input type="file" id="pdfFile" accept="application/pdf,.pdf" hidden>
-    </div>
 
     <div id="pinnedBlock" hidden>
       <p class="eyebrow list-eyebrow">Pinned</p>

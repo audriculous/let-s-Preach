@@ -127,16 +127,24 @@ const listen = initListen({
 });
 
 // Home has two sides: Prepare (your own sermons) and Listen (notes on other people's).
+// Home has three places: sermon prep (studies), scripts (PDFs to preach) and
+// sermon notes (listening). The icons at the top right switch between them.
+const homeMode = () => (['listen', 'scripts'].includes(prefs.homeMode) ? prefs.homeMode : 'prep');
 function syncMode() {
-  const mode = prefs.homeMode === 'listen' ? 'listen' : 'prep';
-  $('listenBtn').classList.toggle('on', mode === 'listen');
-  $('listenBtn').setAttribute('aria-pressed', mode === 'listen');
+  const mode = homeMode();
+  for (const [btn, m] of [['listenBtn', 'listen'], ['scriptsBtn', 'scripts']]) {
+    $(btn).classList.toggle('on', mode === m);
+    $(btn).setAttribute('aria-pressed', mode === m);
+  }
   $('prepArea').hidden = mode !== 'prep';
   $('listenArea').hidden = mode !== 'listen';
+  $('scriptsArea').hidden = mode !== 'scripts';
 }
 function setHomeMode(mode) { prefs.homeMode = mode; savePrefs(); renderLibrary(); window.scrollTo(0, 0); }
-$('listenBtn').addEventListener('click', () => setHomeMode(prefs.homeMode === 'listen' ? 'prep' : 'listen'));
+$('listenBtn').addEventListener('click', () => setHomeMode(homeMode() === 'listen' ? 'prep' : 'listen'));
+$('scriptsBtn').addEventListener('click', () => setHomeMode(homeMode() === 'scripts' ? 'prep' : 'scripts'));
 $('lnBackToPrep').addEventListener('click', () => setHomeMode('prep'));
+$('scBackToPrep').addEventListener('click', () => setHomeMode('prep'));
 
 const sync = initSync({
   settings, saveSettings,
@@ -227,10 +235,10 @@ const prepStudies = async () => (await db.allStudies()).filter(s => !isListen(s)
 
 async function renderLibrary() {
   syncMode();
-  if (prefs.homeMode === 'listen') { listen.renderHome(); return; }
+  if (homeMode() === 'listen') { listen.renderHome(); return; }
+  if (homeMode() === 'scripts') { renderDecks(); return; }
   renderNextUp();
   renderPlanCard();
-  renderDecks();
   const all = (await prepStudies()).sort((a, b) => b.updated - a.updated);
   const q = $('searchInput').value.trim().toLowerCase();
   renderFilters(all);
@@ -1142,18 +1150,30 @@ async function renderDecks() {
   const ul = $('deckList');
   ul.innerHTML = '';
   $('deckHint').hidden = decks.length > 0;
-  for (const d of decks) {
+  $('scTools').hidden = decks.length < 5;
+  const q = $('scSearch').value.trim().toLowerCase();
+  const shown = decks.filter(d => !q || q.split(/\s+/).every(w => d.name.toLowerCase().includes(w)));
+  $('scEmpty').hidden = !(decks.length && !shown.length);
+  for (const d of shown) {
     const li = document.createElement('li');
     li.className = 'study-item deck-item';
     const when = new Date(d.opened || d.created).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
     li.innerHTML = `<span class="deck-play"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></svg></span>
       <div class="meta"><div class="title"></div><div class="sub"></div></div>
+      <button class="ren" aria-label="Rename" title="Rename"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></button>
       <button class="del" aria-label="Remove"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3"/></svg></button>`;
     li.querySelector('.title').textContent = d.name;
     li.querySelector('.sub').textContent = [`${d.pages} page${d.pages === 1 ? '' : 's'}`, d.studyId ? 'from your study' : 'PDF', (d.opened ? 'opened ' : 'added ') + when].join(' · ');
-    li.addEventListener('click', e => { if (!e.target.closest('.del')) preach.open(d); });
+    li.addEventListener('click', e => { if (!e.target.closest('.del, .ren')) preach.open(d); });
+    li.querySelector('.ren').addEventListener('click', async () => {
+      const name = prompt('Name this script', d.name);
+      if (!name || !name.trim() || name.trim() === d.name) return;
+      d.name = name.trim();
+      await db.putDeck(d);
+      renderDecks();
+    });
     li.querySelector('.del').addEventListener('click', async () => {
-      if (!confirm(`Remove "${d.name}" from Ready to preach?`)) return;
+      if (!confirm(`Delete the script "${d.name}"? Anything you wrote on it goes too.`)) return;
       await db.deleteDeck(d.id);
       renderDecks();
     });
@@ -1181,6 +1201,7 @@ async function importPdf(file) {
 }
 
 $('importPdfBtn').addEventListener('click', () => $('pdfFile').click());
+$('scSearch').addEventListener('input', renderDecks);
 $('pdfFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; importPdf(f); });
 // Drag a PDF in from the Files app (Split View or Slide Over) onto the home screen.
 $('library').addEventListener('dragover', e => { if ([...(e.dataTransfer?.items || [])].some(i => i.kind === 'file')) { e.preventDefault(); $('library').classList.add('dropping'); } });
@@ -1189,7 +1210,7 @@ $('library').addEventListener('drop', e => {
   e.preventDefault();
   $('library').classList.remove('dropping');
   const f = [...(e.dataTransfer?.files || [])].find(x => /pdf$/i.test(x.type) || /\.pdf$/i.test(x.name));
-  if (f) importPdf(f); else toast('Drop a PDF to preach from it');
+  if (f) { if (homeMode() !== 'scripts') setHomeMode('scripts'); importPdf(f); } else toast('Drop a PDF to preach from it');
 });
 
 // Preach straight from a study: its marked-up page and outline as a PDF.

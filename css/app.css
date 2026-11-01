@@ -930,3 +930,12 @@ body.preaching { overflow: hidden; }
 .pc-dot.on { box-shadow: 0 0 0 2.5px var(--ink); }
 .preach-pages { align-items: flex-start; overflow-x: auto; touch-action: pan-x pan-y; }
 .preach-page { margin: 0 auto; }
+#scriptsBtn.on { background: var(--label); color: #fff; }
+.study-item .ren {
+  width: 44px; height: 44px; border-radius: 50%; border: 0; background: transparent; color: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.study-item .ren svg { width: 20px; height: 20px; }
+#scriptsCard .pill { margin-top: 4px; }
+#scriptsCard .hint { margin-top: 12px; }
+#scriptsArea #deckList { margin: 18px 0 40px; }
