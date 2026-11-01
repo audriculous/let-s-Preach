@@ -486,9 +486,29 @@ $('cloudBackupsBtn').addEventListener('click', async () => {
 });
 
 // Backup / restore
+// One file with every study, every set of sermon notes, and every script: the PDF
+// itself (as base64) with what you wrote on it.
+const blobToBase64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
+const base64ToBlob = (b64, type = 'application/pdf') => fetch(`data:${type};base64,${b64}`).then(r => r.blob());
+
+async function scriptsForBackup() {
+  let decks = [];
+  try { decks = await db.allDecks(); } catch { return []; }
+  const out = [];
+  for (const d of decks) {
+    const file = await db.getDeckFile(d.id).catch(() => null);
+    if (file) out.push({ ...d, pdf: await blobToBase64(file) });
+  }
+  return out;
+}
+
 $('exportBtn').addEventListener('click', async () => {
-  const all = await db.allStudies();
-  const blob = new Blob([JSON.stringify({ app: 'letspreach', version: 1, studies: all })], { type: 'application/json' });
+  $('busyText').textContent = 'Packing up your studies, notes and scripts…';
+  $('busy').hidden = false;
+  let all, scripts;
+  try { all = await db.allStudies(); scripts = await scriptsForBackup(); }
+  finally { $('busy').hidden = true; $('busyText').textContent = 'Making your PDF…'; }
+  const blob = new Blob([JSON.stringify({ app: 'letspreach', version: 2, studies: all, scripts })], { type: 'application/json' });
   const name = `lets-preach-backup-${new Date().toISOString().slice(0, 10)}.json`;
   const file = new File([blob], name, { type: 'application/json' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -507,9 +527,21 @@ $('importFile').addEventListener('change', async e => {
   if (!f) return;
   try {
     const data = JSON.parse(await f.text());
+    if (data.app !== 'letspreach' && !data.studies) throw new Error('not ours');
     const list = data.studies || [];
     for (const s of list) if (s && s.id && s.passage) { s.modified = Date.now(); await db.putStudy(s); }
-    toast(`Restored ${list.length} ${list.length === 1 ? 'study' : 'studies'}`);
+    let scripts = 0;
+    for (const d of data.scripts || []) {
+      if (!d || !d.id || !d.pdf) continue;
+      const { pdf, ...deck } = d;
+      await db.putDeckFile(deck.id, await base64ToBlob(pdf));
+      await db.putDeck(deck);
+      scripts++;
+    }
+    const notes = list.filter(isListen).length, studies = list.length - notes;
+    const parts = [[studies, 'study', 'studies'], [notes, 'set of sermon notes', 'sets of sermon notes'], [scripts, 'script', 'scripts']]
+      .filter(([n]) => n).map(([n, one, many]) => `${n} ${n === 1 ? one : many}`);
+    toast(parts.length ? `Restored ${parts.join(', ')}` : 'Nothing to restore in that file');
     sync.schedule(3000);
     renderLibrary();
   } catch {
