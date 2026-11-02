@@ -452,6 +452,10 @@
         <button type="button" class="chip-btn" id="cloudBackupsBtn">Cloud backups</button>
       </div>
       <ul id="backupList" class="backup-list" hidden></ul>
+
+      <h3 class="card-title">Storage</h3>
+      <div id="storageLine" class="storage-line"><p class="hint">Adding it up…</p></div>
+      <div class="opt-row"><button type="button" class="chip-btn" id="clearOldBtn">Clear out old items</button></div>
       <div class="dialog-actions">
         <button value="cancel" class="chip-btn">Cancel</button>
         <button value="ok" class="pill"><span>Save</span></button>
@@ -460,6 +464,35 @@
   </dialog>
 
   <!-- Roster from a screenshot -->
+  <dialog id="clearDialog" class="dialog clear-dialog">
+    <form method="dialog" class="dialog-inner">
+      <p class="eyebrow">Storage</p>
+      <h3 class="card-title">Clear out old items</h3>
+      <p class="hint">Oldest first, by when you last opened or changed them. The age buttons skip pinned studies. Back up before you delete: deleted items are gone from this iPad, and from your other devices once they sync.</p>
+      <div class="clear-filters">
+        <div class="seg" id="clearType">
+          <button type="button" data-type="all">Everything</button>
+          <button type="button" data-type="study">Studies</button>
+          <button type="button" data-type="listen">Sermon notes</button>
+          <button type="button" data-type="script">Scripts</button>
+        </div>
+        <div class="clear-age"><span>Tick everything older than</span>
+          <button type="button" class="chip-btn small" data-age="182">6 months</button>
+          <button type="button" class="chip-btn small" data-age="365">1 year</button>
+          <button type="button" class="chip-btn small" data-age="730">2 years</button>
+          <button type="button" class="text-link" id="clearNone">Untick all</button>
+        </div>
+      </div>
+      <ul id="clearList" class="clear-list"></ul>
+      <p class="hint" id="clearSummary"></p>
+      <div class="dialog-actions">
+        <button value="cancel" class="chip-btn">Close</button>
+        <button type="button" class="chip-btn" id="clearBackup">Back up first</button>
+        <button type="button" class="pill danger" id="clearDelete" disabled><span>Delete</span></button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="shotDialog" class="dialog shot-dialog">
     <form method="dialog" class="dialog-inner">
       <p class="eyebrow">Roster from a screenshot</p>

@@ -34,6 +34,7 @@ A sermon prep notebook for iPad and Apple Pencil. Type a passage, it pulls the t
 - **Wide margins and roomy line spacing** so you have space to think. The page grows as you write near the bottom.
 - **Export PDF** of the marked-up page (share icon in the toolbar, or Page options). It splits onto A4 pages without cutting through a line, and opens the share sheet so you can save to Files, AirDrop or print.
 - **Pin studies** to the top of your list with the pin button.
+- **Storage** (Settings): how much room your studies, sermon notes and scripts take, how close the daily cloud backup is to Cloudflare's 25 MB limit (it warns from 80%), and **Clear out old items**: everything listed oldest first with its size, filter by kind, tick everything older than 6 months, 1 year or 2 years (pinned studies are skipped), **Back up first**, then delete.
 - Saves automatically on the iPad and works offline. **Back up / Restore** on the home screen exports everything as one file: studies, sermon notes, and your scripts (the PDFs themselves, with whatever you wrote on them).
 - **Sync and daily cloud backup** between your iPad and laptop through your own Worker (see below).
 

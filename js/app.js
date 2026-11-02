@@ -380,6 +380,7 @@ $('settingsBtn').addEventListener('click', () => {
   $('planTemplate')._steps = null;
   plan.renderTemplateEditor($('planTemplate'), { settings });
   rosterStatusText();
+  renderStorage();
   $('syncCodeInput').value = settings.syncCode || '';
   $('syncOn').checked = settings.syncOn !== false;
   $('backupList').hidden = true;
@@ -547,6 +548,121 @@ $('importFile').addEventListener('change', async e => {
   } catch {
     toast('That file is not a Let\'s Preach backup');
   }
+});
+
+// ---------- storage ----------
+// How much room studies, sermon notes and scripts take, how close the daily cloud
+// backup is to Cloudflare's 25 MB limit for one saved item, and a way to clear out
+// the oldest things.
+
+const CLOUD_LIMIT = 25 * 1024 * 1024;
+const sizeOf = x => new Blob([JSON.stringify(x)]).size;
+const mb = n => !n ? '0 KB' : n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' KB' : n < 1024 ** 3 ? (n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0) + ' MB' : (n / 1024 ** 3).toFixed(1) + ' GB';
+
+async function storageItems() {
+  const items = [];
+  for (const s of await db.allStudies()) {
+    const listen = isListen(s);
+    items.push({
+      kind: listen ? 'listen' : 'study', id: s.id, size: sizeOf(s), when: Math.max(s.updated || 0, s.created || 0),
+      title: listen ? (s.title || (s.passage && s.passage.reference) || 'Sermon notes') : s.title,
+      sub: listen ? [s.preacher, s.date].filter(Boolean).join(' · ') : [s.passage && s.passage.reference !== s.title ? s.passage.reference : '', s.preached ? 'preached ' + s.preached : ''].filter(Boolean).join(' · '),
+      pinned: !!s.pinned,
+    });
+  }
+  let decks = [];
+  try { decks = await db.allDecks(); } catch {}
+  for (const d of decks) {
+    const f = await db.getDeckFile(d.id).catch(() => null);
+    items.push({ kind: 'script', id: d.id, size: (f ? f.size : 0) + sizeOf(d), when: Math.max(d.opened || 0, d.created || 0), title: d.name, sub: `${d.pages} page${d.pages === 1 ? '' : 's'}` });
+  }
+  return items.sort((a, b) => a.when - b.when);
+}
+
+async function renderStorage() {
+  const box = $('storageLine');
+  const items = await storageItems();
+  const sum = k => items.filter(i => i.kind === k).reduce((n, i) => n + i.size, 0);
+  const count = k => items.filter(i => i.kind === k).length;
+  const cloud = sum('study') + sum('listen');
+  const pct = Math.min(100, Math.round(cloud / CLOUD_LIMIT * 100));
+  let device = '';
+  try {
+    const est = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null;
+    if (est && est.usage) device = `This iPad: ${mb(est.usage)} used by Let’s Preach${est.quota ? `, of about ${mb(est.quota)} it may use` : ''}.`;
+  } catch {}
+  const syncing = settings.workerUrl && $('syncCodeInput').value.trim();
+  box.innerHTML = `<div class="storage-rows">
+      <span><b>Studies</b> ${count('study')} · ${mb(sum('study'))}</span>
+      <span><b>Sermon notes</b> ${count('listen')} · ${mb(sum('listen'))}</span>
+      <span><b>Scripts</b> ${count('script') ? `${count('script')} · ${mb(sum('script'))}` : 'none'}</span>
+    </div>
+    ${syncing ? `<div class="storage-cloud${pct >= 80 ? ' warn' : ''}"><div class="storage-bar"><i style="width:${pct}%"></i></div>
+      <p class="hint">Daily cloud backup: ${mb(cloud)} of the 25 MB Cloudflare allows in one backup (${pct}%).${pct >= 80 ? ' Getting close. Clear out old studies or notes, or ask for the Worker to be updated to handle more.' : ''} Scripts are not in the cloud backup.</p></div>` : ''}
+    ${device ? `<p class="hint">${device}</p>` : ''}`;
+}
+
+let clearState = { items: [], picked: new Set(), type: 'all' };
+$('clearOldBtn').addEventListener('click', async () => {
+  clearState = { items: await storageItems(), picked: new Set(), type: 'all' };
+  renderClear();
+  $('clearDialog').showModal();
+});
+
+function renderClear() {
+  const { items, picked, type } = clearState;
+  document.querySelectorAll('#clearType button').forEach(b => b.classList.toggle('active', b.dataset.type === type));
+  const shown = items.filter(i => type === 'all' || i.kind === type);
+  const label = { study: 'Study', listen: 'Notes', script: 'Script' };
+  const ul = $('clearList');
+  ul.innerHTML = shown.length ? '' : '<li class="hint">Nothing here.</li>';
+  for (const i of shown) {
+    const li = document.createElement('li');
+    li.innerHTML = `<label><input type="checkbox"><span class="clear-kind ${i.kind}">${label[i.kind]}</span>
+      <span class="clear-main"><b></b><em></em></span><span class="clear-when"></span><span class="clear-size">${mb(i.size)}</span></label>`;
+    li.querySelector('b').textContent = i.title + (i.pinned ? ' (pinned)' : '');
+    li.querySelector('em').textContent = i.sub;
+    li.querySelector('.clear-when').textContent = i.when ? new Date(i.when).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const cb = li.querySelector('input');
+    cb.checked = picked.has(i.kind + ':' + i.id);
+    cb.addEventListener('change', () => { cb.checked ? picked.add(i.kind + ':' + i.id) : picked.delete(i.kind + ':' + i.id); clearSummary(); });
+    ul.appendChild(li);
+  }
+  clearSummary();
+}
+
+function clearSummary() {
+  const sel = clearState.items.filter(i => clearState.picked.has(i.kind + ':' + i.id));
+  $('clearSummary').textContent = sel.length ? `${sel.length} ticked · ${mb(sel.reduce((n, i) => n + i.size, 0))} would be freed.` : 'Tick what you no longer need.';
+  $('clearDelete').disabled = !sel.length;
+  $('clearDelete').querySelector('span').textContent = sel.length ? `Delete ${sel.length}` : 'Delete';
+}
+
+document.querySelectorAll('#clearType button').forEach(b => b.addEventListener('click', () => { clearState.type = b.dataset.type; renderClear(); }));
+document.querySelectorAll('#clearDialog [data-age]').forEach(b => b.addEventListener('click', () => {
+  const cutoff = Date.now() - +b.dataset.age * 864e5;
+  let n = 0;
+  for (const i of clearState.items) {
+    if ((clearState.type === 'all' || i.kind === clearState.type) && i.when < cutoff && !i.pinned) { clearState.picked.add(i.kind + ':' + i.id); n++; }
+  }
+  renderClear();
+  if (!n) toast('Nothing that old' + (clearState.type === 'all' ? '' : ' here'));
+}));
+$('clearNone').addEventListener('click', () => { clearState.picked.clear(); renderClear(); });
+$('clearBackup').addEventListener('click', () => $('exportBtn').click());
+$('clearDelete').addEventListener('click', async () => {
+  const sel = clearState.items.filter(i => clearState.picked.has(i.kind + ':' + i.id));
+  if (!sel.length || !confirm(`Delete ${sel.length} item${sel.length === 1 ? '' : 's'} (${mb(sel.reduce((n, i) => n + i.size, 0))})? This cannot be undone unless you have a backup.`)) return;
+  for (const i of sel) {
+    if (i.kind === 'script') await db.deleteDeck(i.id).catch(() => {});
+    else { await db.deleteStudy(i.id); sync.recordDelete(i.id); }
+  }
+  sync.schedule(2000);
+  toast(`Deleted ${sel.length} item${sel.length === 1 ? '' : 's'}`);
+  clearState = { items: await storageItems(), picked: new Set(), type: clearState.type };
+  renderClear();
+  renderStorage();
+  renderLibrary();
 });
 
 // ---------- study view ----------
