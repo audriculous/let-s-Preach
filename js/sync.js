@@ -21,7 +21,12 @@ export function initSync({ settings, saveSettings, getOpenId, onRemoteChange }) 
   const state = { status: '', error: false };
 
   const enabled = () => !!(settings.workerUrl && settings.syncCode && settings.syncOn !== false);
-  const base = () => settings.workerUrl.replace(/\/+$/, '');
+  // The Worker's address without any ?query or #part a pasted link may carry.
+  const base = () => {
+    const raw = settings.workerUrl.trim();
+    try { const u = new URL(raw); return (u.origin + u.pathname).replace(/\/+$/, ''); }
+    catch { return raw.replace(/[?#].*$/, '').replace(/\/+$/, ''); }
+  };
 
   async function call(path, body) {
     const res = await fetch(base() + path, {
@@ -29,14 +34,22 @@ export function initSync({ settings, saveSettings, getOpenId, onRemoteChange }) 
       headers: { 'X-Sync-Key': settings.syncCode, ...(body ? { 'Content-Type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
+    const text = await res.text().catch(() => '');
     let data = null;
-    try { data = await res.json(); } catch {}
+    try { data = JSON.parse(text); } catch {}
     if (!res.ok || !data) {
       const why = data && data.error;
+      // The passage fetcher answered instead of sync: the Worker only has the first
+      // version of the code, or the link points somewhere other than the Worker itself.
+      if (!data && /Missing \?search|Unsupported version/i.test(text)) {
+        throw new Error('Your Worker answered as a passage fetcher only, so it has older code. In Cloudflare, open the Worker, Edit code, paste in the latest worker/worker.js from the app\'s GitHub page, and Deploy. Check the KV binding called LP is still there.');
+      }
+      if (res.status === 413) throw new Error('Too much to send in one go. Clear out old items in Settings, Storage.');
       if (res.status === 501 || why === 'no-storage') throw new Error('Your Worker has no storage yet. Add the KV binding called LP (see the README).');
       if (res.status === 404 && !data) throw new Error('Your Worker is the old version. Paste in the new worker code (see the README).');
       if (why === 'bad-key') throw new Error('That sync code is too short.');
-      throw new Error('Sync failed (' + (why || 'HTTP ' + res.status) + ').');
+      const said = !data && text ? ': ' + text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90) : '';
+      throw new Error('Sync failed (' + (why || 'HTTP ' + res.status + said) + ').');
     }
     return data;
   }

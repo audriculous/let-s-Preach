@@ -964,3 +964,4 @@ body.preaching { overflow: hidden; }
 .clear-when, .clear-size { flex: none; font-size: 13px; color: var(--muted); min-width: 64px; text-align: right; }
 .pill.danger { background: var(--danger); color: #fff; width: auto; }
 .pill.danger:disabled { opacity: .45; }
+.icon-chip svg.cog circle { fill: none; stroke: currentColor; }
