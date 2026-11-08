@@ -283,13 +283,15 @@
       <aside id="sheet" class="sheet" hidden>
         <div class="sheet-head">
           <div class="seg" id="sheetTabs">
+            <button type="button" data-tab="observe">Observe</button>
             <button type="button" data-tab="outline">Outline</button>
             <button type="button" data-tab="compare">Compare</button>
-            <button type="button" data-tab="refs">References</button>
+            <button type="button" data-tab="refs">Refs</button>
             <button type="button" data-tab="plan">Plan</button>
           </div>
           <button type="button" class="icon-chip small" id="sheetClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         </div>
+        <div id="observePane" class="sheet-body" hidden></div>
         <div id="outlinePane" class="sheet-body"></div>
         <div id="comparePane" class="sheet-body" hidden></div>
         <div id="refsPane" class="sheet-body" hidden></div>

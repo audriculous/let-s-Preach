@@ -12,6 +12,7 @@ import * as roster from './roster.js';
 import { walkVerses } from './verses.js';
 import { initWordStudy } from './wordstudy.js';
 import * as plan from './plan.js';
+import { renderObserve } from './observe.js';
 import { initListen, isListen } from './listen.js';
 
 const $ = id => document.getElementById(id);
@@ -92,6 +93,13 @@ const refs = initRefs({
 });
 const sheet = initSheet({
   renderRefs: () => refs.renderTab(),
+  renderObserve: verses => renderObserve($('observePane'), {
+    study, verses,
+    save: () => scheduleSave(),
+    onSpot: (norm, label) => toggleSpot(norm, label),
+    onGoto: key => goToVerse(key),
+    onConnectives: () => setSpots(study.spots.slice(), !study.connectives),
+  }),
   renderPlan: () => plan.renderPlanPane($('planPane'), {
     study, settings, toast,
     save: () => scheduleSave(),
@@ -915,6 +923,18 @@ $('rulerBtn').addEventListener('click', () => {
   if (on) toast('Drag the ruler with one finger, turn it with two. Draw along its edge.');
 });
 $('outlineBtn').addEventListener('click', () => sheet.toggle());
+
+// Scroll a verse into view (from the Observe tab) and flash its number.
+function goToVerse(key) {
+  const v = walkVerses(passageEl, study.passage.reference).find(x => x.key === key);
+  if (!v) return;
+  const r = v.el.getBoundingClientRect(), sr = scroller.getBoundingClientRect();
+  scroller.scrollTo({ top: scroller.scrollTop + r.top - sr.top - sr.height * 0.3, behavior: 'smooth' });
+  v.el.classList.remove('flash');
+  void v.el.offsetWidth;
+  v.el.classList.add('flash');
+  setTimeout(() => v.el.classList.remove('flash'), 2200);
+}
 
 // ---------- word spotting ----------
 
