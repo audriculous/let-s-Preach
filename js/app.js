@@ -814,7 +814,7 @@ function setSplitMode(on) {
     $('colorGroup').hidden = $('sizeGroup').hidden = true;
     scroller.classList.add('allow-pan');
     $('study').classList.add('split-mode');
-    toast('Tap a verse on the page to split before it. Tap again to join.');
+    toast('Tap the verse on the page where a point ends. Tap again to join.');
   } else if (ink.tool === 'split') {
     $('study').classList.remove('split-mode');
     setTool(prefs.tool);

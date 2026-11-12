@@ -107,7 +107,7 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
         <button type="button" class="chip-btn small" id="suggestBtn">Suggest a breakup</button>
       </div>
       ${verses.length > 1 ? `
-      <p class="hint">Tap a verse to split before it, tap again to join. Dots show natural seams: headings, new paragraphs and words like “therefore”.</p>
+      <p class="hint">Tap the verse a point ends on, tap again to join. Dots show natural seams before a verse: headings, new paragraphs and words like “therefore”.</p>
       <div class="strip" id="strip"></div>
       <p class="strip-note" id="stripNote"></p>
       <div class="sheet-row tight">
@@ -472,16 +472,22 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     if (message) toast(message);
   }
 
+  // Tap the verse a point ends on: the next point starts on the verse after it.
+  function toggleEnd(ei) {
+    if (ei === verses.length - 1) { toast('That is the end of the passage'); return; }
+    toggleCut(ei + 1);
+  }
+
   function toggleCut(vi) {
     if (vi <= 0 || vi >= verses.length) return;
     const cuts = currentCuts();
     const on = !cuts.includes(vi);
     const S = seams(verses)[vi];
-    const v = verses[vi];
-    const label = (v.v === 1 ? v.ch + ':1' : 'v. ' + v.v);
+    const end = verses[vi - 1];
+    const label = (end.v === 1 ? end.ch + ':1' : 'v. ' + end.v);
     applyCuts(on ? [...cuts, vi] : cuts.filter(c => c !== vi));
     const note = $('stripNote');
-    const msg = on ? `Split before ${label}${S.why.length ? ' (' + S.why.join(', ') + ')' : ''}` : `Joined at ${label}`;
+    const msg = on ? `A point ends at ${label}${S.why.length ? ' (next verse: ' + S.why.join(', ') + ')' : ''}` : `Joined after ${label}`;
     if (note) note.textContent = msg;
     if (sheet.hidden || isSplitMode()) toast(msg);
   }
@@ -502,8 +508,10 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       const dots = Math.min(3, Math.round(S[i].s));
       b.innerHTML = `<span class="seam">${'•'.repeat(dots)}</span><span class="vn">${v.v === 1 ? v.ch + ':1' : v.v}</span>`;
       b.title = i === 0 ? 'Start of the passage' : (S[i].why.join(', ') || 'Mid-paragraph');
-      b.setAttribute('aria-label', `Verse ${v.ch}:${v.v}. ${cuts.includes(i) ? 'Split here. Tap to join.' : 'Tap to split here.'}`);
-      if (i > 0) b.addEventListener('click', () => toggleCut(i));
+      const ends = cuts.includes(i + 1);
+      b.classList.toggle('end', ends);
+      b.setAttribute('aria-label', `Verse ${v.ch}:${v.v}. ${ends ? 'A point ends here. Tap to join.' : 'Tap to end a point here.'}`);
+      b.addEventListener('click', () => toggleEnd(i));
       box.appendChild(b);
     });
   }
@@ -538,12 +546,11 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     b.textContent = on ? 'Done splitting' : 'Split on the page';
   }
 
-  // A tap on the page in split mode: split (or join) before the verse that was tapped.
+  // A tap on the page in split mode: end a point at the verse that was tapped (or join).
   function splitAtKey(key) {
     if (!verses.length) verses = walkVerses(passageContainer(study().passage), study().passage.reference);
     const vi = verses.findIndex(v => v.key === key);
-    if (vi === 0) { toast('That is the start of the passage'); return; }
-    if (vi > 0) toggleCut(vi);
+    if (vi >= 0) toggleEnd(vi);
   }
 
   function suggest() {
