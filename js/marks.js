@@ -142,7 +142,7 @@ export class Marks {
       const tops = starts.map(vi => {
         if (vi < 0) return null;
         const r = verses[vi].el.getBoundingClientRect();
-        return r.height ? { vi, x: (r.left - g.r.left) / g.scale, y: (r.top - g.r.top) / g.scale - font * 0.2 } : null;
+        return r.height ? { vi, x: (r.left - g.r.left) / g.scale, xr: (r.right - g.r.left) / g.scale, y: (r.top - g.r.top) / g.scale - font * 0.2 } : null;
       });
       // Sections run in passage order, each down to where the next one starts.
       const order = tops.map((t, i) => (t ? i : -1)).filter(i => i >= 0).sort((a, b) => tops[a].vi - tops[b].vi);
@@ -152,7 +152,7 @@ export class Marks {
         const color = SECTION_COLORS[i % SECTION_COLORS.length];
         const next = order[k + 1] != null ? tops[order[k + 1]].y - font * 0.35 : textEnd;
         if (next - t.y > 40) items.push({ kind: 'band', x: bx + 15, y: t.y + 40, w: 4, h: next - t.y - 44, color });
-        if (k > 0 && !v.paraStart) items.push({ kind: 'cut', x: t.x - 7, y: t.y, w: 0, h: font * 1.45, color });
+        if (k > 0 && !v.paraStart) items.push({ kind: 'cut', x: t.xr + 3, y: t.y, w: 0, h: font * 1.45, color }); // just after the verse number, so the number goes with the new point
         items.push({ kind: 'badge', x: bx, y: t.y + font * 0.1, w: 34, h: 34, n: i + 1, color, light: !DARK_TEXT.has(color) });
         const title = (o.points[i].title || '').trim();
         if (title && o.titlesOnPage !== false) items.push(titleLabel(title, t, v, { g, left, font, color, light: !DARK_TEXT.has(color), passageEl: this.passageEl, words }));
