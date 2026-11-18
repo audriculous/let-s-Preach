@@ -3,7 +3,7 @@
 // Everything is kept in logical page coordinates so the PDF can draw it too.
 
 import { PAGE_W } from './ink.js';
-import { WORD_RE, CONNECTIVES, normWord, isStopWord, walkVerses, pointStarts } from './verses.js';
+import { WORD_RE, CONNECTIVES, normWord, isStopWord, walkVerses, pointStarts, pointNumbers } from './verses.js';
 
 export const SPOT_COLORS = ['#2f5d8a', '#c62828', '#2e7d32', '#6a1b9a', '#e65100', '#00838f', '#ad1457', '#5d4037'];
 export const CONNECTIVE_COLOR = '#b07a12';
@@ -135,6 +135,7 @@ export class Marks {
     if (o && o.showOnPage !== false && o.points && o.points.length) {
       const verses = walkVerses(this.passageEl, s.passage.reference);
       const starts = pointStarts(o.points, verses);
+      const nums = pointNumbers(o.points);
       const left = parseFloat(this.passageEl.style.marginLeft) || 70;
       const font = parseFloat(this.passageEl.style.fontSize) || 26;
       const lastWord = words[words.length - 1];
@@ -149,11 +150,11 @@ export class Marks {
       const bx = Math.max(4, left - 52);
       order.forEach((i, k) => {
         const t = tops[i], v = verses[t.vi];
-        const color = SECTION_COLORS[i % SECTION_COLORS.length];
+        const color = SECTION_COLORS[(nums[i] - 1) % SECTION_COLORS.length];
         const next = order[k + 1] != null ? tops[order[k + 1]].y - font * 0.35 : textEnd;
         if (next - t.y > 40) items.push({ kind: 'band', x: bx + 15, y: t.y + 40, w: 4, h: next - t.y - 44, color });
         if (k > 0 && !v.paraStart) items.push({ kind: 'cut', x: t.x - 7, y: t.y, w: 0, h: font * 1.45, color });
-        items.push({ kind: 'badge', x: bx, y: t.y + font * 0.1, w: 34, h: 34, n: i + 1, color, light: !DARK_TEXT.has(color) });
+        items.push({ kind: 'badge', x: bx, y: t.y + font * 0.1, w: 34, h: 34, n: nums[i], color, light: !DARK_TEXT.has(color) });
         const title = (o.points[i].title || '').trim();
         if (title && o.titlesOnPage !== false) items.push(titleLabel(title, t, v, { g, left, font, color, light: !DARK_TEXT.has(color), passageEl: this.passageEl, words }));
       });

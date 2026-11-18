@@ -17,7 +17,7 @@ export const DEFAULT_STEPS = [
 
 const AUTO = {
   observe: s => (s.strokes || []).length >= 5 || (s.spots || []).length > 0 || !!s.connectives,
-  shape: s => !!(s.outline && String(s.outline.bigIdea || '').trim() && (s.outline.points || []).length >= 2),
+  shape: s => !!(s.outline && String(s.outline.bigIdea || '').trim() && (s.outline.points || []).filter(p => !p.free).length >= 2),
   apply: s => {
     const o = s.outline || {}, cc = o.cc || {};
     const has = a => a && (String(a.text || '').trim() || (a.pad && a.pad.strokes.length));

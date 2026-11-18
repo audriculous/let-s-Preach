@@ -9,6 +9,7 @@ import { drawStroke, PAGE_W } from './ink.js';
 import { PAD_W } from './pad.js';
 import { LABEL_FONT } from './marks.js';
 import { PROMPTS, gridAnswers } from './sheet.js';
+import { isFree, pointNumbers, FREE_KINDS } from './verses.js';
 
 const PAGE_H = Math.round(PAGE_W * 297 / 210); // A4 in logical px
 const RES = 2;                                  // canvas px per logical px
@@ -254,8 +255,13 @@ function layoutOutline(study) {
     add(T.body, a.text, 4);
     if (inkd) blocks.push({ pad: inkd, gap: 6, indent: 0 });
   }
+  const nums = pointNumbers(o.points || []);
   (o.points || []).forEach((p, i) => {
-    add(T.point, `${i + 1}. ${p.title || 'Point ' + (i + 1)}`, i === 0 ? 34 : 24);
+    if (isFree(p)) {
+      if (!(p.title || p.notes || (p.subs || []).some(Boolean))) return; // an empty intro or application slot
+      add(T.eyebrow, FREE_KINDS[p.kind] || 'Extra', i === 0 ? 34 : 26);
+      add(T.point, p.title, 2);
+    } else add(T.point, `${nums[i]}. ${p.title || 'Point ' + nums[i]}`, i === 0 ? 34 : 24);
     add(T.muted, p.verses, 2, 34);
     (p.subs || []).filter(Boolean).forEach((sub, j) => add(T.body, `${String.fromCharCode(97 + (j % 26))}.  ${sub}`, j ? 0 : 6, 34));
     add(T.body, p.notes, 6, 34);

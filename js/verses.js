@@ -140,9 +140,18 @@ export function openingWords(text, n = 8) {
 }
 
 // Where each point starts: an index into verses, or -1 if its verses do not match.
+// Points not tied to verses: the intro before the breakup, the application after it,
+// and any extra ones you add. They can be dragged anywhere among the verse points.
+export const FREE_KINDS = { intro: 'Intro', apply: 'Application', free: 'Extra' };
+export const isFree = p => !!(p && p.free);
+// Verse points are numbered 1, 2, 3…; free points get null.
+export function pointNumbers(points) { let n = 0; return points.map(p => (isFree(p) ? null : ++n)); }
+export const versePoints = points => (points || []).filter(p => !isFree(p));
+
 export function pointStarts(points, verses) {
   let ch = verses.length ? verses[0].ch : 1;
   return points.map(p => {
+    if (isFree(p)) return -1;
     const m = String(p.verses || '').match(/(?:(\d+)\s*:\s*)?(\d+)/);
     if (!m) return -1;
     if (m[1]) ch = +m[1];

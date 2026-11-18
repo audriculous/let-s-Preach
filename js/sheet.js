@@ -2,7 +2,7 @@
 // application, illustrations, checks before preaching) and a Compare tab that shows
 // other translations verse by verse with the differences marked.
 
-import { walkVerses, passageContainer, suggestBreakup, rangeLabel, openingWords, pointStarts, diffWords, esc, seams, breakupOptions, sectionsFromCuts } from './verses.js';
+import { walkVerses, passageContainer, suggestBreakup, rangeLabel, openingWords, pointStarts, diffWords, esc, seams, breakupOptions, sectionsFromCuts, isFree, pointNumbers, versePoints, FREE_KINDS } from './verses.js';
 import { SECTION_COLORS } from './marks.js';
 import { Pad, emptyPad } from './pad.js';
 import { scanSensitive, CHECKLIST, logicChecks } from './checks.js';
@@ -117,7 +117,10 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       <p class="eyebrow sub">Try a different breakup</p>
       <div class="options" id="options"></div>` : '<p class="hint">This passage has no verse numbers, so add points by hand.</p>'}
       <ol class="points" id="points"></ol>
-      <button type="button" class="text-link" id="addPointBtn">+ Add a point</button>
+      <div class="sheet-row tight point-adds">
+        <button type="button" class="text-link" id="addPointBtn">+ Add a point</button>
+        <button type="button" class="text-link" id="addFreeBtn">+ Add a point without verses</button>
+      </div>
       <label class="opt-row"><span>Show the breakup on the page</span><input type="checkbox" class="switch" id="showBreakup"></label>
       <label class="opt-row"><span>Show point titles in the text</span><input type="checkbox" class="switch" id="showTitles"></label>
 
@@ -179,10 +182,20 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       renderOptions();
     }
     $('addPointBtn').addEventListener('click', () => {
-      o.points.push({ id: pid(), title: '', verses: '', notes: '' });
+      // A verse point goes before the application point at the end, if there is one.
+      const at = o.points.length && o.points[o.points.length - 1].kind === 'apply' ? o.points.length - 1 : o.points.length;
+      o.points.splice(at, 0, { id: pid(), title: '', verses: '', notes: '' });
       save(); renderPoints();
-      const inputs = pane.querySelectorAll('.point-title');
-      inputs[inputs.length - 1]?.focus();
+      pane.querySelectorAll('.point-title')[at]?.focus();
+    });
+    $('addFreeBtn').addEventListener('click', () => {
+      const missing = !o.points.some(p => p.kind === 'intro') ? 'intro' : !o.points.some(p => p.kind === 'apply') ? 'apply' : 'free';
+      const item = freePoint(missing);
+      if (missing === 'intro') o.points.unshift(item);
+      else if (missing === 'apply') o.points.push(item);
+      else o.points.splice(Math.max(0, o.points.length - (o.points[o.points.length - 1]?.kind === 'apply' ? 1 : 0)), 0, item);
+      save(); renderPoints(); marks.render(); rescan();
+      if (missing === 'free') toast('Drag it by its handle to where it belongs');
     });
     $('shareOutlineBtn').addEventListener('click', shareOutline);
 
@@ -206,15 +219,22 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     if (!ol) return;
     ol.innerHTML = '';
     const starts = pointStarts(o.points, verses);
+    const nums = pointNumbers(o.points);
     o.points.forEach((p, i) => {
+      const free = isFree(p);
       const li = document.createElement('li');
-      li.className = 'point';
+      li.className = 'point' + (free ? ' free ' + (p.kind || 'free') : '');
+      li.dataset.i = i;
+      const name = free ? (FREE_KINDS[p.kind] || 'Extra') : 'Point ' + nums[i];
+      const ph = p.kind === 'intro' ? 'Heading or hook' : p.kind === 'apply' ? 'Bring it home' : free ? 'Title' : 'Point ' + nums[i];
       li.innerHTML = `
         <div class="point-head">
-          <span class="point-num" style="--c:${SECTION_COLORS[i % SECTION_COLORS.length]}">${i + 1}</span>
-          <input class="point-title" placeholder="Point ${i + 1}" spellcheck="true">
-          <input class="point-verses" placeholder="vv." aria-label="Verses" inputmode="text">
-          <button type="button" class="point-del" aria-label="Remove point">×</button>
+          ${free ? `<span class="point-grip" aria-label="Drag to move" title="Drag to move"><svg viewBox="0 0 24 24"><path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"/></svg></span>
+            <span class="point-kind">${esc(name)}</span>`
+          : `<span class="point-num" style="--c:${SECTION_COLORS[(nums[i] - 1) % SECTION_COLORS.length]}">${nums[i]}</span>`}
+          <input class="point-title" placeholder="${esc(ph)}" spellcheck="true">
+          ${free ? '' : '<input class="point-verses" placeholder="vv." aria-label="Verses" inputmode="text">'}
+          <button type="button" class="point-del" aria-label="Remove ${esc(name)}">×</button>
         </div>
         <div class="point-start"></div>
         <ul class="subs"></ul>
@@ -225,30 +245,100 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       renderSubs(p, li.querySelector('.subs'));
       li.querySelector('.sub-add').addEventListener('click', () => addSub(p, li.querySelector('.subs'), (p.subs || []).length));
       const start = li.querySelector('.point-start');
-      title.value = p.title; vv.value = p.verses; notes.value = p.notes;
+      title.value = p.title; notes.value = p.notes || '';
       const showStart = idx => {
         start.textContent = idx >= 0 ? '“' + openingWords(verses[idx].text) + '”' : (p.verses ? 'Those verses are not in this passage' : '');
         start.classList.toggle('bad', idx < 0 && !!p.verses);
       };
-      showStart(starts[i]);
+      if (!free) { vv.value = p.verses; showStart(starts[i]); }
       autoGrow(notes);
       title.addEventListener('input', () => { p.title = title.value; save(); rescan(); remark(); });
       notes.addEventListener('input', () => { p.notes = notes.value; autoGrow(notes); save(); rescan(); });
-      vv.addEventListener('input', () => {
+      if (vv) vv.addEventListener('input', () => {
         p.verses = vv.value; save(); rescan();
         showStart(pointStarts(o.points, verses)[i]);
         remark();
         renderStrip();
       });
       li.querySelector('.point-del').addEventListener('click', () => {
-        if ((p.title || p.notes || (p.subs || []).some(Boolean)) && !confirm(`Remove point ${i + 1}?`)) return;
+        if ((p.title || p.notes || (p.subs || []).some(Boolean)) && !confirm(`Remove ${free ? 'the ' + name.toLowerCase() : 'point ' + nums[i]}?`)) return;
         const prev = clone(o.points);
         o.points.splice(i, 1);
         const next = clone(o.points);
         pushAction({ undo: () => applyPoints(prev), redo: () => applyPoints(next) });
         save(); renderPoints(); renderStrip(); renderOptions(); marks.render(); rescan();
       });
+      if (free) dragByGrip(li, i);
       ol.appendChild(li);
+    });
+  }
+
+  const freePoint = kind => ({ id: pid(), free: true, kind, title: '', verses: '', notes: '' });
+
+  // The intro and application points go round the breakup the first time there is one.
+  // Remove either and it stays removed.
+  function frame(pts) {
+    const o = outline();
+    if (o.framed || !versePoints(pts).length) return pts;
+    o.framed = true;
+    const out = pts.slice();
+    if (!out.some(p => p.kind === 'intro')) out.unshift(freePoint('intro'));
+    if (!out.some(p => p.kind === 'apply')) out.push(freePoint('apply'));
+    return out;
+  }
+
+  // Drag a point that is not tied to verses up or down the list by its handle.
+  function dragByGrip(li, from) {
+    const grip = li.querySelector('.point-grip');
+    grip.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      e.preventDefault();
+      const ol = $('points');
+      const items = [...ol.children];
+      const rect = li.getBoundingClientRect();
+      const centers = items.map(x => { const r = x.getBoundingClientRect(); return r.top + r.height / 2; });
+      const startY = e.clientY;
+      let to = from;
+      li.classList.add('dragging');
+      try { grip.setPointerCapture(e.pointerId); } catch {}
+      const move = ev => {
+        if (ev.pointerId !== e.pointerId) return;
+        const dy = ev.clientY - startY;
+        li.style.transform = `translateY(${dy}px)`;
+        const mid = rect.top + rect.height / 2 + dy;
+        to = from;
+        items.forEach((other, k) => {
+          if (other === li) return;
+          const c = centers[k];
+          if (k < from && mid < c) to = Math.min(to, k);
+          if (k > from && mid > c) to = Math.max(to, k);
+        });
+        // Show the gap where it will land.
+        items.forEach((other, k) => {
+          if (other === li) return;
+          const shift = from < to && k > from && k <= to ? -rect.height - 10 : from > to && k >= to && k < from ? rect.height + 10 : 0;
+          other.style.transform = shift ? `translateY(${shift}px)` : '';
+        });
+      };
+      const up = ev => {
+        if (ev.pointerId !== e.pointerId) return;
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', up);
+        grip.removeEventListener('pointercancel', up);
+        items.forEach(x => { x.style.transform = ''; });
+        li.classList.remove('dragging');
+        if (to === from) return;
+        const o = outline();
+        const prev = clone(o.points);
+        const [it] = o.points.splice(from, 1);
+        o.points.splice(to, 0, it);
+        const next = clone(o.points);
+        pushAction({ undo: () => applyPoints(prev), redo: () => applyPoints(next) });
+        save(); renderPoints(); marks.render(); rescan();
+      };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+      grip.addEventListener('pointercancel', up);
     });
   }
 
@@ -366,7 +456,8 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     const box = $('logic');
     if (!box) return;
     const o = outline();
-    const results = logicChecks({ outline: o, starts: pointStarts(o.points, verses), verseCount: verses.length, grid: gridAnswers(o) });
+    const vp = versePoints(o.points);
+    const results = logicChecks({ outline: { ...o, points: vp }, starts: pointStarts(vp, verses), verseCount: verses.length, grid: gridAnswers(o) });
     const good = results.filter(r => r.ok), look = results.filter(r => !r.ok);
     box.innerHTML = `<p class="hint">${look.length ? `${good.length} of ${results.length} look good. Worth a look:` : 'Everything checks out. Read it aloud once to be sure it flows.'}</p>` +
       look.map(r => `<div class="logic-card"><b>${esc(r.label)}</b> ${esc(r.note)}</div>`).join('') +
@@ -436,7 +527,13 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
   // New points for a set of cuts, keeping the title and notes of any point that still
   // starts in the same place. A point that is joined into another hands its notes on.
   function pointsFromCuts(cuts) {
-    const old = outline().points, starts = pointStarts(old, verses);
+    const all = outline().points;
+    // Free points (intro, application, extras) keep their place: remember how many
+    // verse points came before each, and put them back after the same number.
+    const freeAt = [];
+    let seen = 0;
+    for (const p of all) { if (isFree(p)) freeAt.push({ p, after: seen }); else seen++; }
+    const old = versePoints(all), starts = pointStarts(old, verses);
     const secs = sectionsFromCuts(cuts, verses.length);
     const used = new Set();
     const pts = secs.map(sec => {
@@ -453,7 +550,14 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       t.notes = [t.notes, [p.title, p.notes].filter(Boolean).join(': ')].filter(Boolean).join('\n');
       if ((p.subs || []).some(Boolean)) t.subs = [...(t.subs || []), ...p.subs.filter(Boolean)];
     });
-    return pts;
+    // Anything that sat after the last verse point (the application) stays at the end.
+    const out = [];
+    pts.forEach((p, k) => {
+      for (const f of freeAt) if (f.after === k && f.after < seen) out.push({ ...f.p });
+      out.push(p);
+    });
+    for (const f of freeAt) if (f.after >= seen || f.after >= pts.length) out.push({ ...f.p });
+    return frame(out);
   }
 
   function applyPoints(pts) {
@@ -566,7 +670,7 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
     const sources = [
       { where: 'Big idea', text: o.bigIdea },
       ...PROMPTS.map(pr => ({ where: pr.tag, text: o.cc && o.cc[pr.key] ? o.cc[pr.key].text : '' })),
-      ...o.points.flatMap((p, i) => [{ where: `Point ${i + 1}`, text: [p.title, ...(p.subs || []), p.notes].join('\n') }]),
+      ...o.points.map((p, i) => ({ where: isFree(p) ? FREE_KINDS[p.kind] || 'Extra' : `Point ${pointNumbers(o.points)[i]}`, text: [p.title, ...(p.subs || []), p.notes].join('\n') })),
       { where: 'Application', text: o.application },
       { where: 'Illustrations', text: o.illustrations },
       ...gridAnswers(o).map(a => ({ where: a.tag, text: a.text })),
@@ -591,8 +695,10 @@ export function initSheet({ getStudy, save, marks, fetchPassage, getWorker, toas
       const a = o.cc && o.cc[pr.key];
       if (a && (a.text || (a.pad && a.pad.strokes.length))) lines.push(pr.tag.toUpperCase(), a.text || '(handwritten, see the PDF)', '');
     }
+    const nums = pointNumbers(o.points);
     o.points.forEach((p, i) => {
-      lines.push(`${i + 1}. ${p.title || 'Point ' + (i + 1)}${p.verses ? ' (' + p.verses + ')' : ''}`);
+      if (isFree(p)) lines.push(`${(FREE_KINDS[p.kind] || 'Extra').toUpperCase()}${p.title ? ': ' + p.title : ''}`);
+      else lines.push(`${nums[i]}. ${p.title || 'Point ' + nums[i]}${p.verses ? ' (' + p.verses + ')' : ''}`);
       (p.subs || []).filter(Boolean).forEach((sub, j) => lines.push(`   ${String.fromCharCode(97 + (j % 26))}. ${sub}`));
       if (p.notes) lines.push(p.notes.replace(/^/gm, '   '));
       lines.push('');
